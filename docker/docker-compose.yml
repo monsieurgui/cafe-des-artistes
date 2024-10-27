@@ -1,0 +1,22 @@
+version: '3.8'
+
+services:
+  music_bot:
+    build: .
+    container_name: cafe-des-artistes
+    restart: unless-stopped
+    volumes:
+      - ./src/config/config.yaml:/app/src/config/config.yaml:ro  
+      - ./logs:/app/logs
+    environment:
+      - TZ=America/Montreal  # Set your timezone
+    deploy:
+      resources:
+        limits:
+          memory: 512M
+        reservations:
+          memory: 256M
+networks:
+  default:
+    name: cafe-des-artistes-net
+    driver: bridge

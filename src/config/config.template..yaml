@@ -1,0 +1,3 @@
+bot_token: "<enter bot token here>"
+command_prefix: "!"
+ffmpeg_path: "/usr/bin/ffmpeg"
