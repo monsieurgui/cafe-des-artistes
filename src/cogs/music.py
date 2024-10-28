@@ -41,7 +41,10 @@ class Music(commands.Cog):
     async def support(self, ctx, *, message):
         """Send support message to bot owner"""
         try:
-            owner = await self.bot.fetch_user("monsieurgui")
+            # Replace this with your actual Discord user ID
+            owner_id = 503411896041340949  # Put your Discord user ID here
+            owner = await self.bot.fetch_user(owner_id)
+            
             embed = discord.Embed(
                 title=MESSAGES['SUPPORT_TITLE'],
                 description=message,
@@ -64,7 +67,8 @@ class Music(commands.Cog):
                 description=MESSAGES['DM_ERROR'],
                 color=COLORS['ERROR']
             ), delete_after=10)
-        except Exception:
+        except Exception as e:
+            print(f"Support command error: {str(e)}")  # Add logging for debugging
             await ctx.send(embed=discord.Embed(
                 title=MESSAGES['ERROR_TITLE'],
                 description=MESSAGES['SUPPORT_ERROR'],
