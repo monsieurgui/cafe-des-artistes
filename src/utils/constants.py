@@ -2,26 +2,26 @@
 YTDL_OPTIONS = {
     'format': 'bestaudio/best',
     'extractaudio': True,
-    'audioformat': 'mp3',  # Changed from opus to mp3 for better compatibility
-    'noplaylist': True,  # Don't process playlists, only single videos
+    'audioformat': 'mp3',  # Changé de opus à mp3 pour une meilleure compatibilité
+    'noplaylist': True,  # Ne traite pas les playlists, uniquement les vidéos individuelles
     'nocheckcertificate': True,
     'ignoreerrors': False,
     'quiet': True,
     'no_warnings': True,
-    'extract_flat': True,  # Only extract metadata initially
-    'lazy_playlist': True,  # Only extract video information when needed
-    'postprocessor_hooks': [],  # Reduce post-processing overhead
-    'concurrent_fragment_downloads': 3,  # Download fragments concurrently
-    'live_from_start': False,  # Don't download from start of livestreams
-    'source_address': '0.0.0.0',  # Let system choose best interface
-    'preferredcodec': 'mp3',  # Added preferred codec
-    'preferredquality': '192'  # Added quality setting
+    'extract_flat': True,  # Extrait uniquement les métadonnées initialement
+    'lazy_playlist': True,  # Extrait les informations vidéo uniquement quand nécessaire
+    'postprocessor_hooks': [],  # Réduit la charge du post-traitement
+    'concurrent_fragment_downloads': 3,  # Télécharge les fragments simultanément
+    'live_from_start': False,  # Ne télécharge pas depuis le début des diffusions en direct
+    'source_address': '0.0.0.0',  # Laisse le système choisir la meilleure interface
+    'preferredcodec': 'mp3',  # Codec préféré ajouté
+    'preferredquality': '192'  # Paramètre de qualité ajouté
 }
 
 # Configuration FFMPEG
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le'  # Updated options for better compatibility
+    'options': '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le'  # Options mises à jour pour une meilleure compatibilité
 }
 
 # Couleurs des Embeds Discord
@@ -56,5 +56,6 @@ MESSAGES = {
     'LOOP_ENABLED': "🔁 En boucle : {}",
     'LOOP_DISABLED': "➡️ Mode boucle désactivé",
     'LOOP_SINCE': "Depuis : {}",
-    'LOOP_BY': "Loop initié par : {}"
+    'LOOP_BY': "Loop initié par : {}",
+    'PLAYLIST_ERROR': "Impossible de mettre une liste de lecture en boucle. Veuillez fournir un lien vers une seule vidéo."
 }

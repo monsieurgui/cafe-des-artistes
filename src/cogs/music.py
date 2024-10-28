@@ -8,41 +8,42 @@ class Music(commands.Cog):
         self.bot = bot
     
     def get_music_player(self, ctx):
+        """Récupère ou crée un lecteur de musique pour le serveur"""
         if ctx.guild.id not in self.bot.music_players:
             self.bot.music_players[ctx.guild.id] = MusicPlayer(self.bot, ctx)
         return self.bot.music_players[ctx.guild.id]
 
     @commands.command(name='p', aliases=['play'])
     async def play(self, ctx, *, query):
-        """Play a song or playlist from YouTube"""
+        """Joue une chanson ou une playlist depuis YouTube"""
         player = self.get_music_player(ctx)
         await player.add_to_queue(query)
 
     @commands.command(name='s', aliases=['skip'])
     async def skip(self, ctx):
-        """Skip the current song"""
+        """Passe à la chanson suivante"""
         player = self.get_music_player(ctx)
         await player.skip()
 
     @commands.command(name='purge')
     async def purge(self, ctx):
-        """Clear the music queue"""
+        """Vide la file d'attente de musique"""
         player = self.get_music_player(ctx)
         await player.purge()
 
     @commands.command(name='queue', aliases=['q'])
     async def queue(self, ctx, show_all: str = None):
-        """Display the current queue"""
+        """Affiche la file d'attente actuelle"""
         player = self.get_music_player(ctx)
         embed, view = await player.get_detailed_queue(show_all == "all")
         await ctx.send(embed=embed, view=view)
 
     @commands.command(name='support')
     async def support(self, ctx, *, message):
-        """Send support message to bot owner"""
+        """Envoie un message de support au propriétaire du bot"""
         try:
-            # Replace this with your actual Discord user ID
-            owner_id = 503411896041340949  # Put your Discord user ID here
+            # Remplacez ceci par votre ID utilisateur Discord
+            owner_id = 503411896041340949  # Mettez votre ID utilisateur Discord ici
             owner = await self.bot.fetch_user(owner_id)
             
             embed = discord.Embed(
@@ -68,7 +69,7 @@ class Music(commands.Cog):
                 color=COLORS['ERROR']
             ), delete_after=10)
         except Exception as e:
-            print(f"Support command error: {str(e)}")  # Add logging for debugging
+            print(f"Erreur de commande support: {str(e)}")  # Ajout de journalisation pour le débogage
             await ctx.send(embed=discord.Embed(
                 title=MESSAGES['ERROR_TITLE'],
                 description=MESSAGES['SUPPORT_ERROR'],
@@ -77,6 +78,7 @@ class Music(commands.Cog):
 
     @commands.Cog.listener()
     async def on_command_error(self, ctx, error):
+        """Gère les erreurs de commandes"""
         if isinstance(error, commands.CommandInvokeError):
             error = error.original
         
@@ -88,36 +90,36 @@ class Music(commands.Cog):
             )
             await ctx.send(embed=embed, delete_after=10)
 
-    @commands.command(name='quit', help='Leave the voice channel and clear the queue')
+    @commands.command(name='quit', help='Quitte le canal vocal et vide la file d\'attente')
     async def quit(self, ctx):
-        """Leave the voice channel and clear the queue"""
+        """Quitte le canal vocal et vide la file d'attente"""
         player = self.get_music_player(ctx)
         
-        # Clear the queue
+        # Vide la file d'attente
         player.queue.clear()
         
-        # Stop current playback if any
+        # Arrête la lecture en cours s'il y en a une
         if player.voice_client and player.voice_client.is_playing():
             player.voice_client.stop()
         
-        # Cancel any pending disconnect timer
+        # Annule tout minuteur de déconnexion en attente
         if player.disconnect_task:
             player.disconnect_task.cancel()
             player.disconnect_task = None
         
-        # Clean up and disconnect immediately
+        # Nettoie et déconnecte immédiatement
         await player.cleanup()
         
-        # Send confirmation message
+        # Envoie un message de confirmation
         embed = discord.Embed(
             description=MESSAGES['GOODBYE'],
             color=COLORS['WARNING']
         )
         await ctx.send(embed=embed)
 
-    @commands.command(name='help', aliases=['h'], help='Show all available commands')
+    @commands.command(name='help', aliases=['h'])
     async def help(self, ctx):
-        """Display all available commands"""
+        """Affiche toutes les commandes disponibles"""
         embed = discord.Embed(
             title="🎵 Café des Artistes - Commandes",
             description="Voici la liste des commandes disponibles:",
@@ -125,14 +127,14 @@ class Music(commands.Cog):
         )
         
         commands_list = {
-            "!p ou !play": "Jouer une chanson ou une playlist YouTube",
-            "!s ou !skip": "Passer à la prochaine chanson",
-            "!q ou !queue": "Afficher la queue actuelle",
-            "!queue all": "Afficher la queue complète avec pagination",
-            "!purge": "Vider la queue de lecture",
-            "!quit": "Quitter le canal vocal et vider la queue",
+            "!p ou !play": "Jouer une chanson ou une liste de lecture YouTube",
+            "!s ou !skip": "Passer à la chanson suivante",
+            "!q ou !queue": "Afficher la file d'attente actuelle",
+            "!queue all": "Afficher la file complète avec pagination",
+            "!purge": "Vider la file d'attente",
+            "!l ou !loop": "Activer/désactiver la lecture en boucle",
+            "!quit": "Quitter le canal vocal et vider la file d'attente",
             "!h ou !help": "Afficher cette liste de commandes",
-            "!l ou !loop": "Activer/désactiver le mode boucle",
             "!support": "Envoyer un message au propriétaire du bot"
         }
         
@@ -147,9 +149,10 @@ class Music(commands.Cog):
 
     @commands.command(name='l', aliases=['loop'])
     async def loop(self, ctx, *, query=None):
-        """Toggle loop mode for the current song or start looping a new song"""
+        """Active/désactive le mode boucle pour la chanson actuelle ou démarre la boucle d'une nouvelle chanson"""
         player = self.get_music_player(ctx)
         await player.toggle_loop(ctx, query)
 
 async def setup(bot):
+    """Configure le cog de musique"""
     await bot.add_cog(Music(bot))

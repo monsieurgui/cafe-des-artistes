@@ -12,7 +12,28 @@ from core.queue_view import QueueView
 from utils.constants import YTDL_OPTIONS, FFMPEG_OPTIONS, MESSAGES, COLORS
 
 class MusicPlayer:
-    """Gère la lecture de musique pour un serveur Discord spécifique"""
+    """
+    Gère la lecture de musique pour un serveur Discord spécifique.
+    
+    Cette classe s'occupe de :
+    - La gestion de la file d'attente de musique
+    - La lecture et le contrôle des flux audio
+    - La gestion des états de connexion vocale
+    - Le préchargement des chansons
+    - La gestion du mode boucle
+    
+    Attributes:
+        bot (commands.Bot): Instance du bot Discord
+        ctx (commands.Context): Contexte de la commande
+        queue (deque): File d'attente des chansons
+        current (dict): Chanson en cours de lecture
+        voice_client (VoiceClient): Client vocal Discord
+        disconnect_task (Task): Tâche de déconnexion automatique
+        thread_pool (ThreadPoolExecutor): Pool de threads pour le traitement parallèle
+        processing_queue (Queue): File d'attente pour le traitement asynchrone
+        preload_queue (deque): File d'attente pour le préchargement
+        loop (bool): État du mode boucle
+    """
     
     def __init__(self, bot, ctx):
         """
@@ -25,12 +46,11 @@ class MusicPlayer:
         self.queue = deque()
         self.current = None
         self.voice_client = None
-        self.disconnect_task = None  # Tâche pour suivre le minuteur de déconnexion
-        self.thread_pool = ThreadPoolExecutor(max_workers=2)  # Limit concurrent downloads
-        self.processing_queue = asyncio.Queue()  # Queue for background processing
+        self.disconnect_task = None  # Tâche pour le minuteur de déconnexion
+        self.thread_pool = ThreadPoolExecutor(max_workers=3)  # Limite les téléchargements simultanés
+        self.processing_queue = asyncio.Queue()  # File d'attente pour le traitement en arrière-plan
         self.processing_task = None
-        self.preload_queue = deque(maxlen=3)  # Keep next 3 songs preloaded
-        # Add these to existing attributes
+        self.preload_queue = deque(maxlen=3)  # Garde les 3 prochaines chansons préchargées
         self.loop = False
         self.loop_message = None
         self.loop_song = None
@@ -60,24 +80,24 @@ class MusicPlayer:
             raise
 
     async def start_processing(self):
-        """Start background processing if not already running"""
+        """Démarre le traitement en arrière-plan s'il n'est pas déjà en cours"""
         if not self.processing_task:
             self.processing_task = asyncio.create_task(self.process_queue_background())
 
     async def process_queue_background(self):
-        """Background task to process songs in the queue"""
+        """Tâche en arrière-plan pour traiter les chansons dans la file d'attente"""
         try:
             while True:
                 song = await self.processing_queue.get()
                 if song.get('needs_processing', False):
                     try:
-                        # Process the song URL in thread pool
+                        # Traite l'URL de la chanson dans le pool de threads
                         video_data = await asyncio.get_event_loop().run_in_executor(
                             self.thread_pool,
                             self._process_url,
                             song['url']
                         )
-                        # Update song info
+                        # Met à jour les informations de la chanson
                         song.update(video_data)
                         song['needs_processing'] = False
                     except Exception as e:
@@ -90,7 +110,7 @@ class MusicPlayer:
 
     def _process_url(self, url):
         """
-        Process a single URL (runs in thread pool)
+        Traite une seule URL (s'exécute dans le pool de threads)
         """
         with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
             info = ydl.extract_info(url, download=False)
@@ -109,7 +129,7 @@ class MusicPlayer:
             await self.ensure_voice_client()
             await self.start_processing()
             
-            # Disable loop if active
+            # Désactive la boucle si elle est active
             if self.loop:
                 self.loop = False
                 if self.loop_task:
@@ -122,7 +142,7 @@ class MusicPlayer:
                 self.loop_start_time = None
                 self.loop_user = None
                 
-                # Stop current playback if any
+                # Arrête la lecture en cours s'il y en a une
                 if self.voice_client and self.voice_client.is_playing():
                     self.voice_client.stop()
             
@@ -193,7 +213,7 @@ class MusicPlayer:
 
     def _extract_info(self, query):
         """
-        Extracts info from YouTube (runs in thread pool)
+        Extrait les informations depuis YouTube (s'exécute dans le pool de threads)
         """
         is_url = query.startswith(('http://', 'https://', 'www.'))
         ydl_opts = {
@@ -202,18 +222,18 @@ class MusicPlayer:
             'extract_flat': 'in_playlist' if is_url else False,
             'format': 'bestaudio/best',
             'default_search': 'ytsearch' if not is_url else None,
-            'concurrent_fragments': 3,  # Download up to 3 fragments simultaneously
+            'concurrent_fragments': 3,  # Télécharge jusqu'à 3 fragments simultanément
             'postprocessor_args': {
-                'ffmpeg': ['-threads', '3']  # Use 3 threads for ffmpeg processing
+                'ffmpeg': ['-threads', '3']  # Utilise 3 threads pour le traitement ffmpeg
             },
-            'buffersize': 32768,  # Increase buffer size for network operations
+            'buffersize': 32768,  # Augmente la taille du tampon pour les opérations réseau
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(query, download=False)
 
     async def process_video(self, video_url):
         """
-        Process video with optimized settings
+        Traite la vidéo avec des paramètres optimisés
         """
         try:
             loop = asyncio.get_running_loop()
@@ -222,7 +242,7 @@ class MusicPlayer:
                 lambda: self.bot.ytdl.extract_info(video_url, download=False)
             )
             
-            # Pre-process the stream URL to reduce playback startup time
+            # Pré-traite l'URL du flux pour réduire le temps de démarrage de la lecture
             if 'url' in video_data:
                 await loop.run_in_executor(None, lambda: requests.head(video_data['url']))
             
@@ -283,7 +303,7 @@ class MusicPlayer:
             await self.ctx.send(embed=error_embed)
 
     async def skip(self):
-        """Skip the current song"""
+        """Passe à la chanson suivante"""
         if self.voice_client and self.voice_client.is_playing():
             # Disable loop if active
             if self.loop:
@@ -307,7 +327,7 @@ class MusicPlayer:
             await self.ctx.send(MESSAGES['NOTHING_PLAYING'])
             
     async def purge(self):
-        """Clear the music queue"""
+        """Vide la file d'attente de musique"""
         self.queue.clear()
         if self.voice_client and self.voice_client.is_playing():
             self.voice_client.stop()
@@ -380,38 +400,51 @@ class MusicPlayer:
             pass
 
     async def cleanup(self):
-        """Clean up resources and downloaded files"""
-        # Cancel processing task
+        """Nettoie les ressources et les fichiers téléchargés"""
+        # Annule la tâche de traitement
         if self.processing_task:
             self.processing_task.cancel()
             self.processing_task = None
         
-        # Shutdown thread pool
+        # Arrête le pool de threads
         self.thread_pool.shutdown(wait=False)
         
-        # Clear downloaded files
+        # Nettoie les fichiers téléchargés
         if hasattr(self, 'current_file'):
             try:
                 os.remove(self.current_file)
             except:
                 pass
         
-        # Clear memory cache
+        # Nettoie le cache mémoire
         gc.collect()
         
-        # Disconnect from voice
+        # Déconnexion du vocal
         if self.voice_client:
             await self.voice_client.disconnect()
             self.voice_client = None
 
     async def preload_next_songs(self):
-        """Pre-download next few songs in queue"""
+        """
+        Précharge les prochaines chansons de la file d'attente.
+        
+        Cette méthode optimise la lecture en :
+        - Préchargeant jusqu'à 3 chansons à l'avance
+        - Vérifiant la validité des URLs
+        - Mettant en cache les informations des vidéos
+        
+        Notes:
+            - Utilise un système de cache pour éviter les requêtes répétées
+            - Gère automatiquement la mémoire en limitant le nombre de préchargements
+            - S'exécute de manière asynchrone pour ne pas bloquer la lecture
+        """
         while len(self.preload_queue) < 3 and self.queue:
             next_song = self.queue[0]
             future = self.thread_pool.submit(self.download_song, next_song)
             self.preload_queue.append(future)
 
     async def get_detailed_queue(self, show_all=False):
+        """Obtient l'affichage détaillé de la file d'attente"""
         def format_duration(seconds):
             minutes, seconds = divmod(seconds, 60)
             hours, minutes = divmod(minutes, 60)
@@ -420,7 +453,7 @@ class MusicPlayer:
             return f"`{minutes:02d}:{seconds:02d}`"
         
         if not show_all:
-            # Original behavior for !queue
+            # Comportement original pour !queue
             embed = discord.Embed(title="File d'attente détaillée", color=COLORS['INFO'])
             
             if self.current:
@@ -431,7 +464,7 @@ class MusicPlayer:
                     inline=False
                 )
             
-            queue_list = list(self.queue)[:10]
+            queue_list = list(self.queue)[:10]  # Affiche les 10 premières chansons
             if queue_list:
                 queue_text = "\n".join(
                     f"`{i}.` {song['title']} {format_duration(song.get('duration', 0))}"
@@ -452,10 +485,10 @@ class MusicPlayer:
             return embed, None
         
         else:
-            # New paginated behavior for !queue all
+            # Nouveau comportement paginé pour !queue all
             pages = []
             queue_list = list(self.queue)
-            songs_per_page = 20
+            songs_per_page = 20  # Nombre de chansons par page
             total_pages = math.ceil(len(queue_list) / songs_per_page)
             
             for page in range(total_pages):
@@ -501,8 +534,22 @@ class MusicPlayer:
                 
             return pages[0], QueueView(pages) if len(pages) > 1 else None
 
-    def _format_duration(self, seconds):
-        """Format seconds into HH:MM:SS"""
+    def _format_duration(self, seconds: int) -> str:
+        """
+        Formate une durée en secondes en format lisible HH:MM:SS.
+        
+        Args:
+            seconds (int): Nombre de secondes à formater
+        
+        Returns:
+            str: Durée formatée en HH:MM:SS ou MM:SS si moins d'une heure
+        
+        Examples:
+            >>> _format_duration(3665)
+            '01:01:05'
+            >>> _format_duration(185)
+            '03:05'
+        """
         hours = int(seconds // 3600)
         minutes = int((seconds % 3600) // 60)
         seconds = int(seconds % 60)
@@ -512,7 +559,7 @@ class MusicPlayer:
         return f"{minutes:02d}:{seconds:02d}"
 
     async def toggle_loop(self, ctx, query=None):
-        """Toggle loop mode for current song or start looping a new song"""
+        """Active/désactive le mode boucle pour la chanson actuelle ou démarre la boucle d'une nouvelle chanson"""
         await self.ensure_voice_client()
 
         if self.loop:
@@ -549,7 +596,7 @@ class MusicPlayer:
                 )
                 
                 if 'entries' in info:
-                    raise ValueError("Cannot loop a playlist. Please provide a single video URL.")
+                    raise ValueError(MESSAGES['PLAYLIST_ERROR'])
                 
                 self.loop_song = {
                     'url': info.get('webpage_url', query),
@@ -590,7 +637,7 @@ class MusicPlayer:
             await ctx.send(embed=error_embed)
 
     def _create_loop_embed(self):
-        """Create the loop status embed"""
+        """Crée l'embed de statut de la boucle"""
         if not self.loop_song or not self.loop_start_time:
             return None
             
@@ -606,7 +653,7 @@ class MusicPlayer:
         return embed
 
     async def _update_loop_message(self):
-        """Update the loop message every second"""
+        """Met à jour le message de boucle chaque seconde"""
         try:
             while self.loop and self.loop_message:
                 embed = self._create_loop_embed()
@@ -619,16 +666,16 @@ class MusicPlayer:
             print(f"Error updating loop message: {e}")
 
     async def play_loop_song(self):
-        """Helper method to play the loop song"""
+        """Méthode auxiliaire pour jouer la chanson en boucle"""
         if not self.voice_client or not self.loop_song:
             return
 
         try:
             if self.voice_client.is_playing():
                 self.voice_client.stop()
-                await asyncio.sleep(0.5)  # Add small delay to ensure cleanup
+                await asyncio.sleep(0.5)  # Ajoute un petit délai pour assurer le nettoyage
             
-            # Get fresh URL for the audio
+            # Obtient une nouvelle URL pour l'audio
             info = await asyncio.get_event_loop().run_in_executor(
                 self.thread_pool,
                 lambda: self.bot.ytdl.extract_info(self.loop_song['url'], download=False)
@@ -654,12 +701,12 @@ class MusicPlayer:
                 self.loop_task.cancel()
 
     async def _handle_loop_playback(self, error):
-        """Handle loop playback completion or errors"""
+        """Gère la fin de lecture en boucle ou les erreurs"""
         if error:
-            print(f"Error in loop playback: {error}")
+            print(f"Erreur dans la lecture en boucle : {error}")  # Traduit le message d'erreur
             return
         
         if self.loop:
-            # Schedule next loop playback with a small delay
+            # Planifie la prochaine lecture en boucle avec un petit délai
             await asyncio.sleep(0.5)
             await self.play_loop_song()
