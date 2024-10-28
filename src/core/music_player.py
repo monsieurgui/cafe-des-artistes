@@ -455,5 +455,3 @@ class MusicPlayer:
                 pages.append(embed)
                 
             return pages[0], QueueView(pages) if len(pages) > 1 else None
-
-
