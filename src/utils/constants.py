@@ -50,5 +50,9 @@ MESSAGES = {
     'VOICE_CHANNEL_REQUIRED': "Ça prend un channel",
     'NOTHING_PLAYING': "Rian joue mon'homme",
     'SKIPPED': "Skippé",
-    'QUEUE_PURGED': "Purge complete de la queue"
+    'QUEUE_PURGED': "Purge complete de la queue",
+    'LOOP_ENABLED': "🔁 En boucle : {}",
+    'LOOP_DISABLED': "➡️ Mode boucle désactivé",
+    'LOOP_SINCE': "Depuis : {}",
+    'LOOP_BY': "Loop initié par : {}"
 }

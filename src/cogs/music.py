@@ -132,6 +132,7 @@ class Music(commands.Cog):
             "!purge": "Vider la queue de lecture",
             "!quit": "Quitter le canal vocal et vider la queue",
             "!h ou !help": "Afficher cette liste de commandes",
+            "!l ou !loop": "Activer/désactiver le mode boucle",
             "!support": "Envoyer un message au propriétaire du bot"
         }
         
@@ -143,6 +144,12 @@ class Music(commands.Cog):
             )
             
         await ctx.send(embed=embed)
+
+    @commands.command(name='l', aliases=['loop'])
+    async def loop(self, ctx):
+        """Toggle loop mode for the current song"""
+        player = self.get_music_player(ctx)
+        await player.toggle_loop(ctx)
 
 async def setup(bot):
     await bot.add_cog(Music(bot))

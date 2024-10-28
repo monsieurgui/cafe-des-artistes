@@ -30,6 +30,13 @@ class MusicPlayer:
         self.processing_queue = asyncio.Queue()  # Queue for background processing
         self.processing_task = None
         self.preload_queue = deque(maxlen=3)  # Keep next 3 songs preloaded
+        # Add these to existing attributes
+        self.loop = False
+        self.loop_message = None
+        self.loop_song = None
+        self.loop_start_time = None
+        self.loop_user = None
+        self.loop_task = None
         
     async def ensure_voice_client(self):
         """
@@ -455,3 +462,103 @@ class MusicPlayer:
                 pages.append(embed)
                 
             return pages[0], QueueView(pages) if len(pages) > 1 else None
+
+    async def toggle_loop(self, ctx):
+        """Toggle loop mode for current song"""
+        if not self.current:
+            raise ValueError(MESSAGES['NOTHING_PLAYING'])
+
+        if self.loop:
+            # Disable loop
+            self.loop = False
+            if self.loop_task:
+                self.loop_task.cancel()
+                self.loop_task = None
+            if self.loop_message:
+                await self.loop_message.delete()
+                self.loop_message = None
+            self.loop_song = None
+            self.loop_start_time = None
+            self.loop_user = None
+            await ctx.send(embed=discord.Embed(
+                description=MESSAGES['LOOP_DISABLED'],
+                color=COLORS['INFO']
+            ))
+        else:
+            # Enable loop
+            self.loop = True
+            self.loop_song = self.current
+            self.loop_start_time = discord.utils.utcnow()
+            self.loop_user = ctx.author
+            self.queue.clear()  # Clear the queue
+            
+            # Create initial loop message
+            embed = self._create_loop_embed()
+            self.loop_message = await ctx.send(embed=embed)
+            
+            # Start loop update task
+            self.loop_task = asyncio.create_task(self._update_loop_message())
+
+    def _create_loop_embed(self):
+        """Create the loop status embed"""
+        embed = discord.Embed(color=COLORS['INFO'])
+        embed.add_field(
+            name=MESSAGES['LOOP_ENABLED'].format(self.loop_song['title']),
+            value=MESSAGES['LOOP_SINCE'].format(self._format_duration(
+                (discord.utils.utcnow() - self.loop_start_time).total_seconds()
+            )),
+            inline=False
+        )
+        embed.add_field(
+            name=MESSAGES['LOOP_BY'],
+            value=self.loop_user.name,
+            inline=False
+        )
+        return embed
+
+    async def _update_loop_message(self):
+        """Update the loop message every second"""
+        try:
+            while self.loop and self.loop_message:
+                embed = self._create_loop_embed()
+                await self.loop_message.edit(embed=embed)
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass
+        except Exception as e:
+            print(f"Error updating loop message: {e}")
+
+    # Modify play_next method to handle looping
+    async def play_next(self):
+        if self.loop and self.loop_song:
+            self.current = self.loop_song
+            try:
+                audio = discord.FFmpegPCMAudio(self.current['url'], **FFMPEG_OPTIONS)
+                self.voice_client.play(audio, after=lambda e: 
+                    asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
+            except Exception as e:
+                self.loop = False
+                if self.loop_task:
+                    self.loop_task.cancel()
+                error_embed = discord.Embed(
+                    title=MESSAGES['ERROR_TITLE'],
+                    description=f"{self.current['title']}: {str(e)}",
+                    color=COLORS['ERROR']
+                )
+                await self.ctx.send(embed=error_embed)
+        else:
+            # Original play_next logic
+            await super().play_next()
+
+    # Modify cleanup to handle loop
+    async def cleanup(self):
+        if self.loop_task:
+            self.loop_task.cancel()
+            self.loop_task = None
+        if self.loop_message:
+            try:
+                await self.loop_message.delete()
+            except:
+                pass
+        # Continue with original cleanup
+        await super().cleanup()
