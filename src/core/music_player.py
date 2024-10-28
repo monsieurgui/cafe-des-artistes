@@ -109,6 +109,23 @@ class MusicPlayer:
             await self.ensure_voice_client()
             await self.start_processing()
             
+            # Disable loop if active
+            if self.loop:
+                self.loop = False
+                if self.loop_task:
+                    self.loop_task.cancel()
+                    self.loop_task = None
+                if self.loop_message:
+                    await self.loop_message.delete()
+                    self.loop_message = None
+                self.loop_song = None
+                self.loop_start_time = None
+                self.loop_user = None
+                
+                # Stop current playback if any
+                if self.voice_client and self.voice_client.is_playing():
+                    self.voice_client.stop()
+            
             # Run initial info extraction in thread pool
             info = await asyncio.get_event_loop().run_in_executor(
                 self.thread_pool,
@@ -280,7 +297,7 @@ class MusicPlayer:
                 self.loop_song = None
                 self.loop_start_time = None
                 self.loop_user = None
-                
+            
             self.voice_client.stop()
             await self.ctx.send(embed=discord.Embed(
                 description=MESSAGES['SKIPPED'],
