@@ -1,5 +1,6 @@
 discord.py
 yt-dlp
 PyYAML
+PyNaCl
 requests
 python-dotenv

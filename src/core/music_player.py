@@ -6,6 +6,8 @@ from collections import deque
 import gc
 import os
 import math
+import yt_dlp
+import requests
 from core.queue_view import QueueView
 from utils.constants import YTDL_OPTIONS, FFMPEG_OPTIONS, MESSAGES, COLORS
 
@@ -440,4 +442,3 @@ class MusicPlayer:
                 pages.append(embed)
                 
             return pages[0], QueueView(pages) if len(pages) > 1 else None
-
