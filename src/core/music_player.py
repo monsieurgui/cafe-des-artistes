@@ -262,9 +262,26 @@ class MusicPlayer:
             await self.ctx.send(embed=error_embed)
 
     async def skip(self):
+        """Skip the current song"""
         if self.voice_client and self.voice_client.is_playing():
+            # Disable loop if active
+            if self.loop:
+                self.loop = False
+                if self.loop_task:
+                    self.loop_task.cancel()
+                    self.loop_task = None
+                if self.loop_message:
+                    await self.loop_message.delete()
+                    self.loop_message = None
+                self.loop_song = None
+                self.loop_start_time = None
+                self.loop_user = None
+                
             self.voice_client.stop()
-            await self.ctx.send(MESSAGES['SKIPPED'])
+            await self.ctx.send(embed=discord.Embed(
+                description=MESSAGES['SKIPPED'],
+                color=COLORS['SUCCESS']
+            ))
         else:
             await self.ctx.send(MESSAGES['NOTHING_PLAYING'])
             
@@ -463,6 +480,16 @@ class MusicPlayer:
                 
             return pages[0], QueueView(pages) if len(pages) > 1 else None
 
+    def _format_duration(self, seconds):
+        """Format seconds into HH:MM:SS"""
+        hours = int(seconds // 3600)
+        minutes = int((seconds % 3600) // 60)
+        seconds = int(seconds % 60)
+        
+        if hours > 0:
+            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+        return f"{minutes:02d}:{seconds:02d}"
+
     async def toggle_loop(self, ctx):
         """Toggle loop mode for current song"""
         if not self.current:
@@ -487,7 +514,7 @@ class MusicPlayer:
         else:
             # Enable loop
             self.loop = True
-            self.loop_song = self.current
+            self.loop_song = self.current.copy()  # Make a copy of current song
             self.loop_start_time = discord.utils.utcnow()
             self.loop_user = ctx.author
             self.queue.clear()  # Clear the queue
@@ -497,21 +524,27 @@ class MusicPlayer:
             self.loop_message = await ctx.send(embed=embed)
             
             # Start loop update task
+            if self.loop_task:
+                self.loop_task.cancel()
             self.loop_task = asyncio.create_task(self._update_loop_message())
+            
+            # Restart the current song
+            if self.voice_client and self.voice_client.is_playing():
+                self.voice_client.stop()
+            await self.play_next()
 
     def _create_loop_embed(self):
         """Create the loop status embed"""
+        if not self.loop_song or not self.loop_start_time:
+            return None
+            
         embed = discord.Embed(color=COLORS['INFO'])
+        duration = (discord.utils.utcnow() - self.loop_start_time).total_seconds()
+        
         embed.add_field(
             name=MESSAGES['LOOP_ENABLED'].format(self.loop_song['title']),
-            value=MESSAGES['LOOP_SINCE'].format(self._format_duration(
-                (discord.utils.utcnow() - self.loop_start_time).total_seconds()
-            )),
-            inline=False
-        )
-        embed.add_field(
-            name=MESSAGES['LOOP_BY'],
-            value=self.loop_user.name,
+            value=f"{MESSAGES['LOOP_SINCE'].format(self._format_duration(duration))}\n"
+                 f"{MESSAGES['LOOP_BY'].format(self.loop_user.name)}",
             inline=False
         )
         return embed
@@ -521,7 +554,8 @@ class MusicPlayer:
         try:
             while self.loop and self.loop_message:
                 embed = self._create_loop_embed()
-                await self.loop_message.edit(embed=embed)
+                if embed:
+                    await self.loop_message.edit(embed=embed)
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             pass
