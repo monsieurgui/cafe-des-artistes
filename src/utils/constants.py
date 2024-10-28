@@ -2,7 +2,7 @@
 YTDL_OPTIONS = {
     'format': 'bestaudio/best',
     'extractaudio': True,
-    'audioformat': 'opus',
+    'audioformat': 'mp3',  # Changed from opus to mp3 for better compatibility
     'noplaylist': True,  # Don't process playlists, only single videos
     'nocheckcertificate': True,
     'ignoreerrors': False,
@@ -13,13 +13,15 @@ YTDL_OPTIONS = {
     'postprocessor_hooks': [],  # Reduce post-processing overhead
     'concurrent_fragment_downloads': 3,  # Download fragments concurrently
     'live_from_start': False,  # Don't download from start of livestreams
-    'source_address': '0.0.0.0'  # Let system choose best interface
+    'source_address': '0.0.0.0',  # Let system choose best interface
+    'preferredcodec': 'mp3',  # Added preferred codec
+    'preferredquality': '192'  # Added quality setting
 }
 
 # Configuration FFMPEG
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn -threads 3 -buffer_size 32768'
+    'options': '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le'  # Updated options for better compatibility
 }
 
 # Couleurs des Embeds Discord

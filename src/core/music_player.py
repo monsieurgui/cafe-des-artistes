@@ -496,7 +496,6 @@ class MusicPlayer:
 
     async def toggle_loop(self, ctx, query=None):
         """Toggle loop mode for current song or start looping a new song"""
-        # First ensure we have a voice client
         await self.ensure_voice_client()
 
         if self.loop:
@@ -523,16 +522,15 @@ class MusicPlayer:
                 # Process the new song
                 info = await asyncio.get_event_loop().run_in_executor(
                     self.thread_pool,
-                    self._extract_info,
-                    query
+                    lambda: self.bot.ytdl.extract_info(query, download=False)
                 )
                 
                 if 'entries' in info:  # It's a playlist
                     raise ValueError("Cannot loop a playlist. Please provide a single video URL.")
                 
                 self.loop_song = {
-                    'url': info['url'],  # Use direct URL instead of webpage_url
-                    'title': info['title'],
+                    'url': info.get('webpage_url', query),  # Use webpage_url as fallback
+                    'title': info.get('title', 'Unknown Title'),
                     'duration': info.get('duration', 0)
                 }
             elif not self.current:
@@ -543,6 +541,7 @@ class MusicPlayer:
             # Stop current playback if any
             if self.voice_client and self.voice_client.is_playing():
                 self.voice_client.stop()
+                await asyncio.sleep(0.5)  # Add delay before starting new playback
 
             # Set loop parameters
             self.loop = True
@@ -610,12 +609,40 @@ class MusicPlayer:
         try:
             if self.voice_client.is_playing():
                 self.voice_client.stop()
+                await asyncio.sleep(0.5)  # Add small delay to ensure cleanup
             
-            audio = discord.FFmpegPCMAudio(self.loop_song['url'], **FFMPEG_OPTIONS)
-            self.voice_client.play(audio, after=lambda e: 
-                asyncio.run_coroutine_threadsafe(self.play_loop_song(), self.bot.loop))
+            # Get fresh URL for the audio
+            info = await asyncio.get_event_loop().run_in_executor(
+                self.thread_pool,
+                lambda: self.bot.ytdl.extract_info(self.loop_song['url'], download=False)
+            )
+            
+            if info.get('url'):
+                audio = discord.FFmpegPCMAudio(
+                    info['url'],
+                    **FFMPEG_OPTIONS,
+                    executable=self.bot.config.get('ffmpeg_path', 'ffmpeg')
+                )
+                self.voice_client.play(
+                    audio,
+                    after=lambda e: asyncio.run_coroutine_threadsafe(
+                        self._handle_loop_playback(e), 
+                        self.bot.loop
+                    )
+                )
         except Exception as e:
             print(f"Error in play_loop_song: {e}")
             self.loop = False
             if self.loop_task:
                 self.loop_task.cancel()
+
+    async def _handle_loop_playback(self, error):
+        """Handle loop playback completion or errors"""
+        if error:
+            print(f"Error in loop playback: {error}")
+            return
+        
+        if self.loop:
+            # Schedule next loop playback with a small delay
+            await asyncio.sleep(0.5)
+            await self.play_loop_song()
