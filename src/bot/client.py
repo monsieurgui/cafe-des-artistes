@@ -15,7 +15,8 @@ class MusicBot(commands.Bot):
         
         super().__init__(
             command_prefix=self.config['command_prefix'],
-            intents=intents
+            intents=intents,
+            help_command=None  # Add this line to disable default help command
         )
         
         self.ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)

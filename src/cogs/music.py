@@ -115,7 +115,7 @@ class Music(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(name='h', aliases=['help'], help='Show all available commands')
+    @commands.command(name='help', aliases=['h'], help='Show all available commands')
     async def help(self, ctx):
         """Display all available commands"""
         embed = discord.Embed(
