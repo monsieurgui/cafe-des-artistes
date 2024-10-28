@@ -88,5 +88,61 @@ class Music(commands.Cog):
             )
             await ctx.send(embed=embed, delete_after=10)
 
+    @commands.command(name='quit', help='Leave the voice channel and clear the queue')
+    async def quit(self, ctx):
+        """Leave the voice channel and clear the queue"""
+        player = self.get_music_player(ctx)
+        
+        # Clear the queue
+        player.queue.clear()
+        
+        # Stop current playback if any
+        if player.voice_client and player.voice_client.is_playing():
+            player.voice_client.stop()
+        
+        # Cancel any pending disconnect timer
+        if player.disconnect_task:
+            player.disconnect_task.cancel()
+            player.disconnect_task = None
+        
+        # Clean up and disconnect immediately
+        await player.cleanup()
+        
+        # Send confirmation message
+        embed = discord.Embed(
+            description=MESSAGES['GOODBYE'],
+            color=COLORS['WARNING']
+        )
+        await ctx.send(embed=embed)
+
+    @commands.command(name='h', aliases=['help'], help='Show all available commands')
+    async def help(self, ctx):
+        """Display all available commands"""
+        embed = discord.Embed(
+            title="🎵 Café des Artistes - Commandes",
+            description="Voici la liste des commandes disponibles:",
+            color=COLORS['INFO']
+        )
+        
+        commands_list = {
+            "!p ou !play": "Jouer une chanson ou une playlist YouTube",
+            "!s ou !skip": "Passer à la prochaine chanson",
+            "!q ou !queue": "Afficher la queue actuelle",
+            "!queue all": "Afficher la queue complète avec pagination",
+            "!purge": "Vider la queue de lecture",
+            "!quit": "Quitter le canal vocal et vider la queue",
+            "!h ou !help": "Afficher cette liste de commandes",
+            "!support": "Envoyer un message au propriétaire du bot"
+        }
+        
+        for command, description in commands_list.items():
+            embed.add_field(
+                name=command,
+                value=description,
+                inline=False
+            )
+            
+        await ctx.send(embed=embed)
+
 async def setup(bot):
     await bot.add_cog(Music(bot))

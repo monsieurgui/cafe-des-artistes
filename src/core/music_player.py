@@ -262,10 +262,16 @@ class MusicPlayer:
             await self.ctx.send(MESSAGES['NOTHING_PLAYING'])
             
     async def purge(self):
+        """Clear the music queue"""
         self.queue.clear()
         if self.voice_client and self.voice_client.is_playing():
             self.voice_client.stop()
-        await self.cleanup()  # Disconnect after purging
+        
+        # Start disconnect timer
+        if self.disconnect_task:
+            self.disconnect_task.cancel()
+        self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
+        
         await self.ctx.send(MESSAGES['QUEUE_PURGED'])
 
     async def get_queue_display(self):
@@ -311,14 +317,20 @@ class MusicPlayer:
         Peut être annulé si une nouvelle chanson est ajoutée
         """
         try:
-            await asyncio.sleep(1800)
-            if self.voice_client and not self.voice_client.is_playing() and len(self.queue) == 0:
+            await asyncio.sleep(1800)  # 30 minutes
+            if (self.voice_client and 
+                not self.voice_client.is_playing() and 
+                len(self.queue) == 0 and 
+                self.voice_client.channel and 
+                len(self.voice_client.channel.members) <= 1):
+                
                 embed = discord.Embed(
                     description=MESSAGES['GOODBYE'],
-                    color=COLORS['WARNING']  # Couleur jaune
+                    color=COLORS['WARNING']
                 )
                 await self.ctx.send(embed=embed)
                 await self.cleanup()
+                
         except asyncio.CancelledError:
             pass
 
@@ -442,3 +454,4 @@ class MusicPlayer:
                 pages.append(embed)
                 
             return pages[0], QueueView(pages) if len(pages) > 1 else None
+
