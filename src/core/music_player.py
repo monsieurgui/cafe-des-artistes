@@ -530,6 +530,10 @@ class MusicPlayer:
 
     # Modify play_next method to handle looping
     async def play_next(self):
+        """
+        Joue la prochaine chanson dans la file d'attente
+        Gère la déconnexion automatique si la file est vide
+        """
         if self.loop and self.loop_song:
             self.current = self.loop_song
             try:
@@ -546,9 +550,48 @@ class MusicPlayer:
                     color=COLORS['ERROR']
                 )
                 await self.ctx.send(embed=error_embed)
-        else:
-            # Original play_next logic
-            await super().play_next()
+            return
+
+        # Original play_next logic
+        if not self.queue:
+            if not self.voice_client or len(self.voice_client.channel.members) <= 1:
+                embed = discord.Embed(
+                    description=MESSAGES['GOODBYE'],
+                    color=COLORS['WARNING']
+                )
+                await self.ctx.send(embed=embed)
+                await self.cleanup()
+            else:
+                embed = discord.Embed(
+                    description=MESSAGES['QUEUE_EMPTY'],
+                    color=COLORS['WARNING']
+                )
+                await self.ctx.send(embed=embed)
+                # Start disconnect timer
+                if self.disconnect_task:
+                    self.disconnect_task.cancel()
+                self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
+            return
+
+        song = self.queue.popleft()
+        self.current = song
+
+        # Wait for processing to complete if needed
+        while song.get('needs_processing', False):
+            await asyncio.sleep(0.5)
+            
+        try:
+            audio = discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTIONS)
+            self.voice_client.play(audio, after=lambda e: 
+                asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
+            await self.ctx.send(embed=await self.get_queue_display())
+        except Exception as e:
+            error_embed = discord.Embed(
+                title=MESSAGES['ERROR_TITLE'],
+                description=f"{song['title']}: {str(e)}",
+                color=COLORS['ERROR']
+            )
+            await self.ctx.send(embed=error_embed)
 
     # Modify cleanup to handle loop
     async def cleanup(self):
