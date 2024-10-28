@@ -533,20 +533,26 @@ class MusicPlayer:
             ))
             return
 
-        # Enable loop
         try:
+            # Clear queue and stop current playback first
+            self.queue.clear()
+            if self.voice_client and self.voice_client.is_playing():
+                self.voice_client.stop()
+                await asyncio.sleep(0.5)  # Wait for playback to fully stop
+
+            # Set up the song to loop
             if query:
-                # Process the new song
+                # Extract info with updated options
                 info = await asyncio.get_event_loop().run_in_executor(
                     self.thread_pool,
                     lambda: self.bot.ytdl.extract_info(query, download=False)
                 )
                 
-                if 'entries' in info:  # It's a playlist
+                if 'entries' in info:
                     raise ValueError("Cannot loop a playlist. Please provide a single video URL.")
                 
                 self.loop_song = {
-                    'url': info.get('webpage_url', query),  # Use webpage_url as fallback
+                    'url': info.get('webpage_url', query),
                     'title': info.get('title', 'Unknown Title'),
                     'duration': info.get('duration', 0)
                 }
@@ -555,27 +561,21 @@ class MusicPlayer:
             else:
                 self.loop_song = self.current.copy()
 
-            # Stop current playback if any
-            if self.voice_client and self.voice_client.is_playing():
-                self.voice_client.stop()
-                await asyncio.sleep(0.5)  # Add delay before starting new playback
-
-            # Set loop parameters
+            # Enable loop before starting playback
             self.loop = True
             self.loop_start_time = discord.utils.utcnow()
             self.loop_user = ctx.author
-            self.queue.clear()  # Clear the queue
-            
-            # Create initial loop message
+
+            # Create and send the loop message
             embed = self._create_loop_embed()
             self.loop_message = await ctx.send(embed=embed)
-            
-            # Start loop update task
+
+            # Start the loop update task
             if self.loop_task:
                 self.loop_task.cancel()
             self.loop_task = asyncio.create_task(self._update_loop_message())
-            
-            # Start playing the loop song
+
+            # Start the loop playback
             await self.play_loop_song()
 
         except Exception as e:
