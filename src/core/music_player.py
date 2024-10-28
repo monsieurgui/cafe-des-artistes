@@ -490,11 +490,8 @@ class MusicPlayer:
             return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
         return f"{minutes:02d}:{seconds:02d}"
 
-    async def toggle_loop(self, ctx):
-        """Toggle loop mode for current song"""
-        if not self.current:
-            raise ValueError(MESSAGES['NOTHING_PLAYING'])
-
+    async def toggle_loop(self, ctx, query=None):
+        """Toggle loop mode for current song or start looping a new song"""
         if self.loop:
             # Disable loop
             self.loop = False
@@ -513,11 +510,42 @@ class MusicPlayer:
             ))
         else:
             # Enable loop
+            if query:
+                # Process the new song
+                try:
+                    info = await asyncio.get_event_loop().run_in_executor(
+                        self.thread_pool,
+                        self._extract_info,
+                        query
+                    )
+                    
+                    if 'entries' in info:  # It's a playlist
+                        raise ValueError("Cannot loop a playlist. Please provide a single video URL.")
+                    
+                    self.loop_song = {
+                        'url': info['webpage_url'],
+                        'title': info['title'],
+                        'duration': info.get('duration', 0),
+                        'needs_processing': True
+                    }
+                    
+                    # Process the URL
+                    await self.processing_queue.put(self.loop_song)
+                    while self.loop_song.get('needs_processing', False):
+                        await asyncio.sleep(0.5)
+                    
+                except Exception as e:
+                    raise ValueError(f"Error processing video: {str(e)}")
+            elif not self.current:
+                raise ValueError(MESSAGES['NOTHING_PLAYING'])
+            else:
+                self.loop_song = self.current.copy()
+
+            # Stop current playback if any
             if self.voice_client and self.voice_client.is_playing():
-                self.voice_client.stop()  # Stop current playback
-                
+                self.voice_client.stop()
+
             self.loop = True
-            self.loop_song = self.current.copy()  # Store current song
             self.loop_start_time = discord.utils.utcnow()
             self.loop_user = ctx.author
             self.queue.clear()  # Clear the queue

@@ -146,10 +146,10 @@ class Music(commands.Cog):
         await ctx.send(embed=embed)
 
     @commands.command(name='l', aliases=['loop'])
-    async def loop(self, ctx):
-        """Toggle loop mode for the current song"""
+    async def loop(self, ctx, *, query=None):
+        """Toggle loop mode for the current song or start looping a new song"""
         player = self.get_music_player(ctx)
-        await player.toggle_loop(ctx)
+        await player.toggle_loop(ctx, query)
 
 async def setup(bot):
     await bot.add_cog(Music(bot))
