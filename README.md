@@ -18,6 +18,7 @@ A Discord music bot built with discord.py that plays music from YouTube with que
 - `!s` or `!skip` - Skip the current song
 - `!purge` - Clear the music queue
 - `!q` or `!queue` - Display current queue
+- `!help` or `!h` - Display all available commands
 - `!queue all` - Display full queue with pagination
 - `!support` - Send a support message to bot owner
 
