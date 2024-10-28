@@ -513,8 +513,11 @@ class MusicPlayer:
             ))
         else:
             # Enable loop
+            if self.voice_client and self.voice_client.is_playing():
+                self.voice_client.stop()  # Stop current playback
+                
             self.loop = True
-            self.loop_song = self.current.copy()  # Make a copy of current song
+            self.loop_song = self.current.copy()  # Store current song
             self.loop_start_time = discord.utils.utcnow()
             self.loop_user = ctx.author
             self.queue.clear()  # Clear the queue
@@ -528,10 +531,21 @@ class MusicPlayer:
                 self.loop_task.cancel()
             self.loop_task = asyncio.create_task(self._update_loop_message())
             
-            # Restart the current song
-            if self.voice_client and self.voice_client.is_playing():
-                self.voice_client.stop()
-            await self.play_next()
+            # Start playing the loop song
+            try:
+                audio = discord.FFmpegPCMAudio(self.loop_song['url'], **FFMPEG_OPTIONS)
+                self.voice_client.play(audio, after=lambda e: 
+                    asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
+            except Exception as e:
+                self.loop = False
+                if self.loop_task:
+                    self.loop_task.cancel()
+                error_embed = discord.Embed(
+                    title=MESSAGES['ERROR_TITLE'],
+                    description=f"{self.loop_song['title']}: {str(e)}",
+                    color=COLORS['ERROR']
+                )
+                await ctx.send(embed=error_embed)
 
     def _create_loop_embed(self):
         """Create the loop status embed"""
