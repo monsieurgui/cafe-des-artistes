@@ -335,11 +335,24 @@ class MusicPlayer:
             pass
 
     async def cleanup(self):
-        """Clean up resources"""
+        """Clean up resources and downloaded files"""
+        # Cancel processing task
         if self.processing_task:
             self.processing_task.cancel()
             self.processing_task = None
+        
+        # Shutdown thread pool
         self.thread_pool.shutdown(wait=False)
+        
+        # Clear downloaded files
+        if hasattr(self, 'current_file'):
+            try:
+                os.remove(self.current_file)
+            except:
+                pass
+        
+        # Clear memory cache
+        gc.collect()
         
         # Disconnect from voice
         if self.voice_client:
@@ -352,18 +365,6 @@ class MusicPlayer:
             next_song = self.queue[0]
             future = self.thread_pool.submit(self.download_song, next_song)
             self.preload_queue.append(future)
-
-    def cleanup(self):
-        """Clean up downloaded files and cached data"""
-        # Clear downloaded files after playing
-        if hasattr(self, 'current_file'):
-            try:
-                os.remove(self.current_file)
-            except:
-                pass
-        
-        # Clear memory cache
-        gc.collect()
 
     async def get_detailed_queue(self, show_all=False):
         def format_duration(seconds):
@@ -454,4 +455,5 @@ class MusicPlayer:
                 pages.append(embed)
                 
             return pages[0], QueueView(pages) if len(pages) > 1 else None
+
 
