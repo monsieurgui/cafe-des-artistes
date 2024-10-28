@@ -221,6 +221,11 @@ class MusicPlayer:
         Joue la prochaine chanson dans la file d'attente
         Gère la déconnexion automatique si la file est vide
         """
+        if self.loop and self.loop_song:
+            await self.play_loop_song()
+            return
+
+        # Original play_next logic
         if not self.queue:
             if not self.voice_client or len(self.voice_client.channel.members) <= 1:
                 embed = discord.Embed(
@@ -235,7 +240,6 @@ class MusicPlayer:
                     color=COLORS['WARNING']
                 )
                 await self.ctx.send(embed=embed)
-                # Start disconnect timer
                 if self.disconnect_task:
                     self.disconnect_task.cancel()
                 self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
@@ -492,6 +496,9 @@ class MusicPlayer:
 
     async def toggle_loop(self, ctx, query=None):
         """Toggle loop mode for current song or start looping a new song"""
+        # First ensure we have a voice client
+        await self.ensure_voice_client()
+
         if self.loop:
             # Disable loop
             self.loop = False
@@ -508,34 +515,26 @@ class MusicPlayer:
                 description=MESSAGES['LOOP_DISABLED'],
                 color=COLORS['INFO']
             ))
-        else:
-            # Enable loop
+            return
+
+        # Enable loop
+        try:
             if query:
                 # Process the new song
-                try:
-                    info = await asyncio.get_event_loop().run_in_executor(
-                        self.thread_pool,
-                        self._extract_info,
-                        query
-                    )
-                    
-                    if 'entries' in info:  # It's a playlist
-                        raise ValueError("Cannot loop a playlist. Please provide a single video URL.")
-                    
-                    self.loop_song = {
-                        'url': info['webpage_url'],
-                        'title': info['title'],
-                        'duration': info.get('duration', 0),
-                        'needs_processing': True
-                    }
-                    
-                    # Process the URL
-                    await self.processing_queue.put(self.loop_song)
-                    while self.loop_song.get('needs_processing', False):
-                        await asyncio.sleep(0.5)
-                    
-                except Exception as e:
-                    raise ValueError(f"Error processing video: {str(e)}")
+                info = await asyncio.get_event_loop().run_in_executor(
+                    self.thread_pool,
+                    self._extract_info,
+                    query
+                )
+                
+                if 'entries' in info:  # It's a playlist
+                    raise ValueError("Cannot loop a playlist. Please provide a single video URL.")
+                
+                self.loop_song = {
+                    'url': info['url'],  # Use direct URL instead of webpage_url
+                    'title': info['title'],
+                    'duration': info.get('duration', 0)
+                }
             elif not self.current:
                 raise ValueError(MESSAGES['NOTHING_PLAYING'])
             else:
@@ -545,6 +544,7 @@ class MusicPlayer:
             if self.voice_client and self.voice_client.is_playing():
                 self.voice_client.stop()
 
+            # Set loop parameters
             self.loop = True
             self.loop_start_time = discord.utils.utcnow()
             self.loop_user = ctx.author
@@ -560,20 +560,18 @@ class MusicPlayer:
             self.loop_task = asyncio.create_task(self._update_loop_message())
             
             # Start playing the loop song
-            try:
-                audio = discord.FFmpegPCMAudio(self.loop_song['url'], **FFMPEG_OPTIONS)
-                self.voice_client.play(audio, after=lambda e: 
-                    asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
-            except Exception as e:
-                self.loop = False
-                if self.loop_task:
-                    self.loop_task.cancel()
-                error_embed = discord.Embed(
-                    title=MESSAGES['ERROR_TITLE'],
-                    description=f"{self.loop_song['title']}: {str(e)}",
-                    color=COLORS['ERROR']
-                )
-                await ctx.send(embed=error_embed)
+            await self.play_loop_song()
+
+        except Exception as e:
+            self.loop = False
+            if self.loop_task:
+                self.loop_task.cancel()
+            error_embed = discord.Embed(
+                title=MESSAGES['ERROR_TITLE'],
+                description=str(e),
+                color=COLORS['ERROR']
+            )
+            await ctx.send(embed=error_embed)
 
     def _create_loop_embed(self):
         """Create the loop status embed"""
@@ -604,80 +602,20 @@ class MusicPlayer:
         except Exception as e:
             print(f"Error updating loop message: {e}")
 
-    # Modify play_next method to handle looping
-    async def play_next(self):
-        """
-        Joue la prochaine chanson dans la file d'attente
-        Gère la déconnexion automatique si la file est vide
-        """
-        if self.loop and self.loop_song:
-            self.current = self.loop_song
-            try:
-                audio = discord.FFmpegPCMAudio(self.current['url'], **FFMPEG_OPTIONS)
-                self.voice_client.play(audio, after=lambda e: 
-                    asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
-            except Exception as e:
-                self.loop = False
-                if self.loop_task:
-                    self.loop_task.cancel()
-                error_embed = discord.Embed(
-                    title=MESSAGES['ERROR_TITLE'],
-                    description=f"{self.current['title']}: {str(e)}",
-                    color=COLORS['ERROR']
-                )
-                await self.ctx.send(embed=error_embed)
+    async def play_loop_song(self):
+        """Helper method to play the loop song"""
+        if not self.voice_client or not self.loop_song:
             return
 
-        # Original play_next logic
-        if not self.queue:
-            if not self.voice_client or len(self.voice_client.channel.members) <= 1:
-                embed = discord.Embed(
-                    description=MESSAGES['GOODBYE'],
-                    color=COLORS['WARNING']
-                )
-                await self.ctx.send(embed=embed)
-                await self.cleanup()
-            else:
-                embed = discord.Embed(
-                    description=MESSAGES['QUEUE_EMPTY'],
-                    color=COLORS['WARNING']
-                )
-                await self.ctx.send(embed=embed)
-                # Start disconnect timer
-                if self.disconnect_task:
-                    self.disconnect_task.cancel()
-                self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
-            return
-
-        song = self.queue.popleft()
-        self.current = song
-
-        # Wait for processing to complete if needed
-        while song.get('needs_processing', False):
-            await asyncio.sleep(0.5)
-            
         try:
-            audio = discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTIONS)
+            if self.voice_client.is_playing():
+                self.voice_client.stop()
+            
+            audio = discord.FFmpegPCMAudio(self.loop_song['url'], **FFMPEG_OPTIONS)
             self.voice_client.play(audio, after=lambda e: 
-                asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
-            await self.ctx.send(embed=await self.get_queue_display())
+                asyncio.run_coroutine_threadsafe(self.play_loop_song(), self.bot.loop))
         except Exception as e:
-            error_embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=f"{song['title']}: {str(e)}",
-                color=COLORS['ERROR']
-            )
-            await self.ctx.send(embed=error_embed)
-
-    # Modify cleanup to handle loop
-    async def cleanup(self):
-        if self.loop_task:
-            self.loop_task.cancel()
-            self.loop_task = None
-        if self.loop_message:
-            try:
-                await self.loop_message.delete()
-            except:
-                pass
-        # Continue with original cleanup
-        await super().cleanup()
+            print(f"Error in play_loop_song: {e}")
+            self.loop = False
+            if self.loop_task:
+                self.loop_task.cancel()
