@@ -264,7 +264,7 @@ class MusicPlayer:
 
         # Original play_next logic
         if not self.queue:
-            if not self.voice_client or len(self.voice_client.channel.members) <= 1:
+            if not self.voice_client:
                 embed = discord.Embed(
                     description=MESSAGES['GOODBYE'],
                     color=COLORS['WARNING']
@@ -277,8 +277,12 @@ class MusicPlayer:
                     color=COLORS['WARNING']
                 )
                 await self.ctx.send(embed=embed)
+                
+                # Cancel any existing disconnect task
                 if self.disconnect_task:
                     self.disconnect_task.cancel()
+                
+                # Start new disconnect task
                 self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
             return
 
@@ -382,13 +386,24 @@ class MusicPlayer:
         Peut être annulé si une nouvelle chanson est ajoutée
         """
         try:
+            # Send warning message
+            warning_embed = discord.Embed(
+                description=MESSAGES['WAIT_MESSAGE'],
+                color=COLORS['WARNING']
+            )
+            await self.ctx.send(embed=warning_embed)
+            
+            # Wait 30 minutes
             await asyncio.sleep(1800)  # 30 minutes
-            if (self.voice_client and 
+            
+            # Check conditions for disconnect
+            should_disconnect = (
+                self.voice_client and 
                 not self.voice_client.is_playing() and 
-                len(self.queue) == 0 and 
-                self.voice_client.channel and 
-                len(self.voice_client.channel.members) <= 1):
-                
+                len(self.queue) == 0
+            )
+            
+            if should_disconnect:
                 embed = discord.Embed(
                     description=MESSAGES['GOODBYE'],
                     color=COLORS['WARNING']
@@ -398,6 +413,8 @@ class MusicPlayer:
                 
         except asyncio.CancelledError:
             pass
+        except Exception as e:
+            print(f"Error in delayed_disconnect: {e}")
 
     async def cleanup(self):
         """Nettoie les ressources et les fichiers téléchargés"""
@@ -434,7 +451,7 @@ class MusicPlayer:
         - Mettant en cache les informations des vidéos
         
         Notes:
-            - Utilise un système de cache pour éviter les requêtes répétées
+            - Utilise un système de cache pour éviter les requêtes répét��es
             - Gère automatiquement la mémoire en limitant le nombre de préchargements
             - S'exécute de manière asynchrone pour ne pas bloquer la lecture
         """
