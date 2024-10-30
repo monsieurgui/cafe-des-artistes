@@ -126,6 +126,7 @@ class MusicPlayer:
         :param query: URL ou terme de recherche YouTube
         """
         try:
+            self.ensure_thread_pool()
             await self.ensure_voice_client()
             await self.start_processing()
             
@@ -424,7 +425,9 @@ class MusicPlayer:
             self.processing_task = None
         
         # Arrête le pool de threads
-        self.thread_pool.shutdown(wait=False)
+        if hasattr(self, 'thread_pool') and not self.thread_pool._shutdown:
+            self.thread_pool.shutdown(wait=False)
+        self.thread_pool = None  # Allow for recreation
         
         # Nettoie les fichiers téléchargés
         if hasattr(self, 'current_file'):
@@ -451,7 +454,7 @@ class MusicPlayer:
         - Mettant en cache les informations des vidéos
         
         Notes:
-            - Utilise un système de cache pour éviter les requêtes répét��es
+            - Utilise un système de cache pour éviter les requêtes répétées
             - Gère automatiquement la mémoire en limitant le nombre de préchargements
             - S'exécute de manière asynchrone pour ne pas bloquer la lecture
         """
@@ -727,3 +730,8 @@ class MusicPlayer:
             # Planifie la prochaine lecture en boucle avec un petit délai
             await asyncio.sleep(0.5)
             await self.play_loop_song()
+
+    def ensure_thread_pool(self):
+        """Ensures the thread pool is initialized and active"""
+        if not hasattr(self, 'thread_pool') or self.thread_pool is None or self.thread_pool._shutdown:
+            self.thread_pool = ThreadPoolExecutor(max_workers=3)
