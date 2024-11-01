@@ -327,8 +327,7 @@ class MusicPlayer:
 
             audio = discord.FFmpegPCMAudio(
                 song['url'],
-                **FFMPEG_OPTIONS,
-                before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2'
+                **FFMPEG_OPTIONS
             )
             self.voice_client.play(audio, after=lambda e: 
                 asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
@@ -742,8 +741,7 @@ class MusicPlayer:
             if info.get('url'):
                 audio = discord.FFmpegPCMAudio(
                     info['url'],
-                    **FFMPEG_OPTIONS,
-                    executable=self.bot.config.get('ffmpeg_path', 'ffmpeg')
+                    **FFMPEG_OPTIONS
                 )
                 self.voice_client.play(
                     audio,
