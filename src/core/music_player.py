@@ -295,7 +295,8 @@ class MusicPlayer:
             await self.play_loop_song()
             return
 
-        if not self.queue:
+        # Check if queue is empty before proceeding
+        if not self.queue and not self.voice_client.is_playing():
             if not self.voice_client:
                 embed = discord.Embed(
                     description=MESSAGES['GOODBYE'],
@@ -316,6 +317,7 @@ class MusicPlayer:
                 self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
             return
 
+        # Only pop from queue when we're ready to play
         song = self.queue.popleft()
         self.current = song
 
@@ -741,7 +743,8 @@ class MusicPlayer:
             if info.get('url'):
                 audio = discord.FFmpegPCMAudio(
                     info['url'],
-                    **FFMPEG_OPTIONS
+                    **FFMPEG_OPTIONS,
+                    executable=self.bot.config.get('ffmpeg_path', 'ffmpeg')
                 )
                 self.voice_client.play(
                     audio,
