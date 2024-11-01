@@ -1,3 +1,5 @@
+import subprocess
+
 # Configuration YT-DLP
 YTDL_OPTIONS = {
     'format': 'bestaudio/best',
@@ -20,8 +22,9 @@ YTDL_OPTIONS = {
 
 # Configuration FFMPEG
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le'  # Options mises à jour pour une meilleure compatibilité
+    'options': '-vn -loglevel quiet',
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 -analyzeduration 0 -probesize 32768',
+    'stderr': subprocess.DEVNULL
 }
 
 # Couleurs des Embeds Discord

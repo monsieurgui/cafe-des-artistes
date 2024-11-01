@@ -244,18 +244,22 @@ class MusicPlayer:
             'quiet': True,
             'no_warnings': True,
             'extract_flat': 'in_playlist' if is_url else False,
-            'format': 'bestaudio',
+            'format': 'ba[ext=webm]',  # Prefer webm audio format
             'default_search': 'ytsearch' if not is_url else None,
-            'concurrent_fragments': 5,
+            'concurrent_fragments': 10,  # Increased from 5
             'postprocessor_args': {
-                'ffmpeg': ['-threads', '2']
+                'ffmpeg': ['-threads', '3']
             },
-            'buffersize': 65536,
-            'socket_timeout': 3,
-            'extractor_retries': 2,
+            'buffersize': 131072,  # Doubled buffer size
+            'socket_timeout': 2,
+            'extractor_retries': 1,  # Reduced retries
             'nocheckcertificate': True,
             'prefer_insecure': True,
-            'http_chunk_size': 10485760,
+            'http_chunk_size': 20971520,  # 20MB chunks
+            'live_from_start': False,
+            'cachedir': False,  # Disable cache
+            'progress_hooks': [],  # Disable progress hooks
+            'no_color': True,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(query, download=False)
@@ -315,11 +319,17 @@ class MusicPlayer:
         song = self.queue.popleft()
         self.current = song
 
-        while song.get('needs_processing', False):
-            await asyncio.sleep(0.5)
-            
         try:
-            audio = discord.FFmpegPCMAudio(song['url'], **FFMPEG_OPTIONS)
+            # Start pre-fetching next song if available
+            if self.queue:
+                next_song = self.queue[0]
+                asyncio.create_task(self._prefetch_song(next_song))
+
+            audio = discord.FFmpegPCMAudio(
+                song['url'],
+                **FFMPEG_OPTIONS,
+                before_options='-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2'
+            )
             self.voice_client.play(audio, after=lambda e: 
                 asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
             await self.ctx.send(embed=await self.get_queue_display())
@@ -818,3 +828,25 @@ class MusicPlayer:
                 color=COLORS['ERROR']
             )
             await self.ctx.send(embed=error_embed)
+
+    async def _prefetch_song(self, song):
+        """Pre-fetch song data to reduce loading time"""
+        try:
+            if not hasattr(self, '_song_cache'):
+                self._song_cache = {}
+                
+            if song['url'] not in self._song_cache:
+                info = await asyncio.get_event_loop().run_in_executor(
+                    self.thread_pool,
+                    lambda: self.bot.ytdl.extract_info(song['url'], download=False)
+                )
+                self._song_cache[song['url']] = info
+                
+                # Pre-warm connection
+                if 'url' in info:
+                    await asyncio.get_event_loop().run_in_executor(
+                        self.thread_pool,
+                        lambda: requests.head(info['url'], timeout=2)
+                    )
+        except Exception as e:
+            print(f"Prefetch error: {e}")
