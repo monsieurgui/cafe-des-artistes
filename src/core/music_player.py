@@ -755,3 +755,54 @@ class MusicPlayer:
                 max_workers=2,  # Reduced from 3 to 2
                 thread_name_prefix='music_worker'
             )
+
+    async def add_multiple_to_queue(self, query, repeat_count=1):
+        """
+        Ajoute plusieurs fois une chanson ou une playlist à la file d'attente
+        """
+        try:
+            current_time = asyncio.get_event_loop().time()
+            if current_time - self.last_add_time < self.add_cooldown:
+                return
+            self.last_add_time = current_time
+
+            self.ensure_thread_pool()
+            await self.ensure_voice_client()
+            await self.start_processing()
+            
+            async with self.batch_lock:
+                # Handle loop mode disabling (same as in add_to_queue)
+                if self.loop:
+                    self.loop = False
+                    if self.loop_task:
+                        self.loop_task.cancel()
+                        self.loop_task = None
+                    if self.loop_message:
+                        await self.loop_message.delete()
+                        self.loop_message = None
+                    self.loop_song = None
+                    self.loop_start_time = None
+                    self.loop_user = None
+                    
+                    if self.current:
+                        temp_current = self.current.copy()
+                        self.queue.appendleft(temp_current)
+                    
+                    if self.voice_client and self.voice_client.is_playing():
+                        self.voice_client.stop()
+
+                # Add to batch queue multiple times
+                for _ in range(repeat_count):
+                    self.batch_queue.append(query)
+                
+                # Start or restart batch processing
+                if not self.batch_task or self.batch_task.done():
+                    self.batch_task = asyncio.create_task(self._process_batch())
+
+        except Exception as e:
+            error_embed = discord.Embed(
+                title=MESSAGES['ERROR_TITLE'],
+                description=str(e),
+                color=COLORS['ERROR']
+            )
+            await self.ctx.send(embed=error_embed)

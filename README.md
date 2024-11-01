@@ -15,6 +15,8 @@ A Discord music bot built with discord.py that plays music from YouTube with que
 ## Commands
 
 - `!p` or `!play` - Play a song or playlist from YouTube
+- `!p5` - Play a song or playlist 5 times
+- `!p10` - Play a song or playlist 10 times
 - `!s` or `!skip` - Skip the current song
 - `!purge` - Clear the music queue
 - `!q` or `!queue` - Display current queue

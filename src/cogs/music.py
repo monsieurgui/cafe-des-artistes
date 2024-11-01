@@ -128,6 +128,8 @@ class Music(commands.Cog):
         
         commands_list = {
             "!p ou !play": "Jouer une chanson ou une liste de lecture YouTube",
+            "!p5": "Jouer une chanson ou une playlist 5 fois",
+            "!p10": "Jouer une chanson ou une playlist 10 fois",
             "!s ou !skip": "Passer à la chanson suivante",
             "!q ou !queue": "Afficher la file d'attente actuelle",
             "!queue all": "Afficher la file complète avec pagination",
@@ -152,6 +154,18 @@ class Music(commands.Cog):
         """Active/désactive le mode boucle pour la chanson actuelle ou démarre la boucle d'une nouvelle chanson"""
         player = self.get_music_player(ctx)
         await player.toggle_loop(ctx, query)
+
+    @commands.command(name='p5')
+    async def play_five(self, ctx, *, query):
+        """Joue une chanson ou une playlist 5 fois"""
+        player = self.get_music_player(ctx)
+        await player.add_multiple_to_queue(query, 5)
+
+    @commands.command(name='p10')
+    async def play_ten(self, ctx, *, query):
+        """Joue une chanson ou une playlist 10 fois"""
+        player = self.get_music_player(ctx)
+        await player.add_multiple_to_queue(query, 10)
 
 async def setup(bot):
     """Configure le cog de musique"""
