@@ -101,14 +101,20 @@ class MusicPlayer:
                 song = await self.processing_queue.get()
                 if song.get('needs_processing', False):
                     try:
-                        # Traite l'URL de la chanson dans le pool de threads
-                        video_data = await asyncio.get_event_loop().run_in_executor(
-                            self.thread_pool,
-                            self._process_url,
-                            song['url']
-                        )
-                        # Met à jour les informations de la chanson
-                        song.update(video_data)
+                        # Use cached data if available
+                        if hasattr(self, '_cached_urls') and song['url'] in self._cached_urls:
+                            song.update(self._cached_urls[song['url']])
+                        else:
+                            video_data = await asyncio.get_event_loop().run_in_executor(
+                                self.thread_pool,
+                                self._process_url,
+                                song['url']
+                            )
+                            song.update(video_data)
+                            # Cache the result
+                            if not hasattr(self, '_cached_urls'):
+                                self._cached_urls = {}
+                            self._cached_urls[song['url']] = video_data
                         song['needs_processing'] = False
                     except Exception as e:
                         print(f"Error processing {song['url']}: {e}")
@@ -238,13 +244,18 @@ class MusicPlayer:
             'quiet': True,
             'no_warnings': True,
             'extract_flat': 'in_playlist' if is_url else False,
-            'format': 'bestaudio/best',
+            'format': 'bestaudio',
             'default_search': 'ytsearch' if not is_url else None,
-            'concurrent_fragments': 3,  # Télécharge jusqu'à 3 fragments simultanément
+            'concurrent_fragments': 5,
             'postprocessor_args': {
-                'ffmpeg': ['-threads', '3']  # Utilise 3 threads pour le traitement ffmpeg
+                'ffmpeg': ['-threads', '2']
             },
-            'buffersize': 32768,  # Augmente la taille du tampon pour les opérations réseau
+            'buffersize': 65536,
+            'socket_timeout': 3,
+            'extractor_retries': 2,
+            'nocheckcertificate': True,
+            'prefer_insecure': True,
+            'http_chunk_size': 10485760,
         }
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
             return ydl.extract_info(query, download=False)
@@ -757,31 +768,21 @@ class MusicPlayer:
             )
 
     async def add_multiple_to_queue(self, query, repeat_count=1):
-        """
-        Ajoute plusieurs fois une chanson ou une playlist à la file d'attente
-        """
         try:
-            # Initial checks
             self.ensure_thread_pool()
             await self.ensure_voice_client()
             await self.start_processing()
             
-            # Process each addition sequentially
-            for _ in range(repeat_count):
-                current_time = asyncio.get_event_loop().time()
-                if current_time - self.last_add_time < self.add_cooldown:
-                    await asyncio.sleep(self.add_cooldown)
-                self.last_add_time = current_time
-
-                # Extract info for the song/playlist
-                info = await asyncio.get_event_loop().run_in_executor(
-                    self.thread_pool,
-                    self._extract_info,
-                    query
-                )
-                
-                if 'entries' in info:  # Playlist
-                    entries = [e for e in info['entries'] if e]
+            # Extract info only once
+            info = await asyncio.get_event_loop().run_in_executor(
+                self.thread_pool,
+                self._extract_info,
+                query
+            )
+            
+            if 'entries' in info:  # Playlist
+                entries = [e for e in info['entries'] if e]
+                for _ in range(repeat_count):
                     for entry in entries:
                         song = {
                             'url': f"https://www.youtube.com/watch?v={entry['id']}",
@@ -791,22 +792,24 @@ class MusicPlayer:
                         }
                         self.queue.append(song)
                         await self.processing_queue.put(song)
-                else:  # Single video
-                    song = {
-                        'url': info['webpage_url'],
-                        'title': info['title'],
-                        'duration': info.get('duration', 0),
-                        'needs_processing': True
-                    }
+            else:  # Single video
+                song_template = {
+                    'url': info['webpage_url'],
+                    'title': info['title'],
+                    'duration': info.get('duration', 0),
+                    'needs_processing': True
+                }
+                for _ in range(repeat_count):
+                    song = song_template.copy()
                     self.queue.append(song)
                     await self.processing_queue.put(song)
-                
-                # Start playing if nothing is playing
-                if not self.voice_client.is_playing():
-                    await self.play_next()
-                else:
-                    # Update queue display
-                    await self.ctx.send(embed=await self.get_queue_display())
+            
+            # Start playing if nothing is playing
+            if not self.voice_client.is_playing():
+                await self.play_next()
+            else:
+                # Update queue display
+                await self.ctx.send(embed=await self.get_queue_display())
 
         except Exception as e:
             error_embed = discord.Embed(
