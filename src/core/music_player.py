@@ -33,6 +33,11 @@ class MusicPlayer:
         processing_queue (Queue): File d'attente pour le traitement asynchrone
         preload_queue (deque): File d'attente pour le préchargement
         loop (bool): État du mode boucle
+        last_add_time (float): Temps de la dernière addition de chanson
+        add_cooldown (float): Cooldown entre les additions de chansons
+        batch_queue (list): File d'attente pour les additions par lots
+        batch_task (Task): Tâche pour les additions par lots
+        batch_lock (Lock): Verrou pour les additions par lots
     """
     
     def __init__(self, bot, ctx):
@@ -57,6 +62,11 @@ class MusicPlayer:
         self.loop_start_time = None
         self.loop_user = None
         self.loop_task = None
+        self.last_add_time = 0
+        self.add_cooldown = 1.0  # 1 second cooldown between adds
+        self.batch_queue = []
+        self.batch_task = None
+        self.batch_lock = asyncio.Lock()
         
     async def ensure_voice_client(self):
         """
@@ -122,88 +132,47 @@ class MusicPlayer:
 
     async def add_to_queue(self, query):
         """
-        Ajoute une chanson ou une playlist à la file d'attente
-        :param query: URL ou terme de recherche YouTube
+        Ajoute une chanson ou une playlist à la file d'attente avec rate limiting
         """
         try:
+            current_time = asyncio.get_event_loop().time()
+            if current_time - self.last_add_time < self.add_cooldown:
+                return
+            self.last_add_time = current_time
+
             self.ensure_thread_pool()
             await self.ensure_voice_client()
             await self.start_processing()
             
-            # Désactive la boucle si elle est active
-            if self.loop:
-                self.loop = False
-                if self.loop_task:
-                    self.loop_task.cancel()
-                    self.loop_task = None
-                if self.loop_message:
-                    await self.loop_message.delete()
-                    self.loop_message = None
-                self.loop_song = None
-                self.loop_start_time = None
-                self.loop_user = None
-                
-                # Arrête la lecture en cours s'il y en a une
-                if self.voice_client and self.voice_client.is_playing():
-                    self.voice_client.stop()
-            
-            # Run initial info extraction in thread pool
-            info = await asyncio.get_event_loop().run_in_executor(
-                self.thread_pool,
-                self._extract_info,
-                query
-            )
-            
-            if 'entries' in info:  # Playlist
-                playlist_title = info.get('title', 'Liste de lecture')
-                entries = [e for e in info['entries'] if e]
-                
-                embed = discord.Embed(
-                    title=MESSAGES['PLAYLIST_ADDED'],
-                    description=f"Ajout de {len(entries)} pièces de la liste:\n**{playlist_title}**",
-                    color=COLORS['SUCCESS']
-                )
-                await self.ctx.send(embed=embed)
-                
-                # Add songs to queue and process them in background
-                for entry in entries:
-                    song = {
-                        'url': f"https://www.youtube.com/watch?v={entry['id']}",
-                        'title': entry.get('title', 'Unknown Title'),
-                        'duration': entry.get('duration', 0),
-                        'needs_processing': True
-                    }
-                    self.queue.append(song)
-                    await self.processing_queue.put(song)
-                
-                success_embed = discord.Embed(
-                    description=MESSAGES['SONGS_ADDED'].format(len(entries)),
-                    color=COLORS['SUCCESS']
-                )
-                await self.ctx.send(embed=success_embed)
-            
-            else:  # Single video
-                song = {
-                    'url': info['webpage_url'],
-                    'title': info['title'],
-                    'duration': info.get('duration', 0),
-                    'needs_processing': True
-                }
-                self.queue.append(song)
-                await self.processing_queue.put(song)
-                
-                embed = discord.Embed(
-                    description=MESSAGES['SONG_ADDED'].format(song['title']),
-                    color=COLORS['SUCCESS']
-                )
-                await self.ctx.send(embed=embed)
-            
-            await self.ctx.send(embed=await self.get_queue_display())
-            
-            # Start playing if nothing is playing
-            if not self.voice_client.is_playing():
-                await self.play_next()
+            async with self.batch_lock:
+                # Handle loop mode disabling
+                if self.loop:
+                    self.loop = False
+                    if self.loop_task:
+                        self.loop_task.cancel()
+                        self.loop_task = None
+                    if self.loop_message:
+                        await self.loop_message.delete()
+                        self.loop_message = None
+                    self.loop_song = None
+                    self.loop_start_time = None
+                    self.loop_user = None
                     
+                    # Set the current looped song as the first in queue
+                    if self.current:
+                        temp_current = self.current.copy()
+                        self.queue.appendleft(temp_current)
+                    
+                    if self.voice_client and self.voice_client.is_playing():
+                        self.voice_client.stop()
+
+                # Add to batch queue
+                self.batch_queue.append(query)
+                
+                # Start or restart batch processing
+                if not self.batch_task or self.batch_task.done():
+                    self.batch_task = asyncio.create_task(self._process_batch())
+
         except Exception as e:
             error_embed = discord.Embed(
                 title=MESSAGES['ERROR_TITLE'],
@@ -211,6 +180,54 @@ class MusicPlayer:
                 color=COLORS['ERROR']
             )
             await self.ctx.send(embed=error_embed)
+
+    async def _process_batch(self):
+        """Process batched song additions"""
+        try:
+            await asyncio.sleep(0.5)  # Wait for more potential additions
+            
+            async with self.batch_lock:
+                queries = self.batch_queue.copy()
+                self.batch_queue.clear()
+            
+            for query in queries:
+                info = await asyncio.get_event_loop().run_in_executor(
+                    self.thread_pool,
+                    self._extract_info,
+                    query
+                )
+                
+                if 'entries' in info:  # Playlist
+                    entries = [e for e in info['entries'] if e]
+                    for entry in entries:
+                        song = {
+                            'url': f"https://www.youtube.com/watch?v={entry['id']}",
+                            'title': entry.get('title', 'Unknown Title'),
+                            'duration': entry.get('duration', 0),
+                            'needs_processing': True
+                        }
+                        self.queue.append(song)
+                        await self.processing_queue.put(song)
+                else:  # Single video
+                    song = {
+                        'url': info['webpage_url'],
+                        'title': info['title'],
+                        'duration': info.get('duration', 0),
+                        'needs_processing': True
+                    }
+                    self.queue.append(song)
+                    await self.processing_queue.put(song)
+            
+            # Update queue display only once after batch processing
+            if queries:
+                await self.ctx.send(embed=await self.get_queue_display())
+                
+                # Start playing if nothing is playing
+                if not self.voice_client.is_playing():
+                    await self.play_next()
+                    
+        except Exception as e:
+            print(f"Error in batch processing: {e}")
 
     def _extract_info(self, query):
         """
@@ -263,7 +280,6 @@ class MusicPlayer:
             await self.play_loop_song()
             return
 
-        # Original play_next logic
         if not self.queue:
             if not self.voice_client:
                 embed = discord.Embed(
@@ -279,18 +295,15 @@ class MusicPlayer:
                 )
                 await self.ctx.send(embed=embed)
                 
-                # Cancel any existing disconnect task
                 if self.disconnect_task:
                     self.disconnect_task.cancel()
                 
-                # Start new disconnect task
                 self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
             return
 
         song = self.queue.popleft()
         self.current = song
 
-        # Wait for processing to complete if needed
         while song.get('needs_processing', False):
             await asyncio.sleep(0.5)
             
@@ -306,6 +319,7 @@ class MusicPlayer:
                 color=COLORS['ERROR']
             )
             await self.ctx.send(embed=error_embed)
+            await self.play_next()
 
     async def skip(self):
         """Passe à la chanson suivante"""
@@ -737,4 +751,7 @@ class MusicPlayer:
     def ensure_thread_pool(self):
         """Ensures the thread pool is initialized and active"""
         if not hasattr(self, 'thread_pool') or self.thread_pool is None or self.thread_pool._shutdown:
-            self.thread_pool = ThreadPoolExecutor(max_workers=3)
+            self.thread_pool = ThreadPoolExecutor(
+                max_workers=2,  # Reduced from 3 to 2
+                thread_name_prefix='music_worker'
+            )
