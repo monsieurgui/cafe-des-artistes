@@ -344,7 +344,7 @@ class MusicPlayer:
         
         await self.ctx.send(MESSAGES['QUEUE_PURGED'])
 
-    async def get_queue_display(self):
+    def get_queue_display(self):
         embed = discord.Embed(color=COLORS['INFO'])
         
         def format_duration(seconds):
@@ -362,20 +362,23 @@ class MusicPlayer:
                 inline=False
             )
         
-        # Show only next song
+        # Show next three songs
         if self.queue:
-            next_song = self.queue[0]
-            duration = format_duration(next_song.get('duration', 0))
+            next_songs = list(self.queue)[:3]
+            next_songs_text = "\n".join(
+                f"{i+1}. {song['title']} {format_duration(song.get('duration', 0))}"
+                for i, song in enumerate(next_songs)
+            )
             embed.add_field(
                 name=MESSAGES['NEXT_SONGS'],
-                value=f"{next_song['title']} {duration}",
+                value=next_songs_text,
                 inline=False
             )
             
-            remaining = len(self.queue) - 1
+            remaining = len(self.queue) - 3
             if remaining > 0:
                 embed.set_footer(text=MESSAGES['REMAINING_SONGS'].format(remaining))
-                
+        
         if not self.current and not self.queue:
             embed.description = MESSAGES['QUEUE_EMPTY_SAD']
             
