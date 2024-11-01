@@ -344,7 +344,7 @@ class MusicPlayer:
         
         await self.ctx.send(MESSAGES['QUEUE_PURGED'])
 
-    def get_queue_display(self):
+    async def get_queue_display(self):
         embed = discord.Embed(color=COLORS['INFO'])
         
         def format_duration(seconds):
