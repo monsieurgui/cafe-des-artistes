@@ -321,29 +321,30 @@ class MusicPlayer:
                     self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
                 return
 
-            # Only pop from queue when we're ready to play
             song = self.queue.popleft()
             self.current = song
 
             try:
-                if self.queue:
-                    next_song = self.queue[0]
-                    asyncio.create_task(self._prefetch_song(next_song))
-
-                audio = discord.FFmpegPCMAudio(
-                    song['url'],
-                    **FFMPEG_OPTIONS
+                # Get fresh audio URL
+                info = await asyncio.get_event_loop().run_in_executor(
+                    self.thread_pool,
+                    lambda: self.bot.ytdl.extract_info(song['url'], download=False)
                 )
                 
-                def after_callback(error):
-                    if error:
-                        print(f"Error in playback: {error}")
-                    # Use create_task instead of run_coroutine_threadsafe
-                    asyncio.create_task(self.play_next())
-                
-                self.voice_client.play(audio, after=after_callback)
-                await self.ctx.send(embed=await self.get_queue_display())
-                
+                if info.get('url'):
+                    audio = discord.FFmpegPCMAudio(
+                        info['url'],
+                        **FFMPEG_OPTIONS
+                    )
+                    
+                    def after_callback(error):
+                        if error:
+                            print(f"Error in playback: {error}")
+                        asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop)
+                    
+                    self.voice_client.play(audio, after=after_callback)
+                    await self.ctx.send(embed=await self.get_queue_display())
+                    
             except Exception as e:
                 error_embed = discord.Embed(
                     title=MESSAGES['ERROR_TITLE'],
@@ -351,7 +352,6 @@ class MusicPlayer:
                     color=COLORS['ERROR']
                 )
                 await self.ctx.send(embed=error_embed)
-                self._playing_lock = False
                 await self.play_next()
         finally:
             self._playing_lock = False
