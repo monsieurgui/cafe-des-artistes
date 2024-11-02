@@ -289,59 +289,72 @@ class MusicPlayer:
     async def play_next(self):
         """
         Joue la prochaine chanson dans la file d'attente
-        Gère la déconnexion automatique si la file est vide
         """
-        if self.loop and self.loop_song:
-            await self.play_loop_song()
+        # Prevent multiple simultaneous calls
+        if hasattr(self, '_playing_lock') and self._playing_lock:
             return
-
-        # Check if queue is empty before proceeding
-        if not self.queue and not self.voice_client.is_playing():
-            if not self.voice_client:
-                embed = discord.Embed(
-                    description=MESSAGES['GOODBYE'],
-                    color=COLORS['WARNING']
-                )
-                await self.ctx.send(embed=embed)
-                await self.cleanup()
-            else:
-                embed = discord.Embed(
-                    description=MESSAGES['QUEUE_EMPTY'],
-                    color=COLORS['WARNING']
-                )
-                await self.ctx.send(embed=embed)
-                
-                if self.disconnect_task:
-                    self.disconnect_task.cancel()
-                
-                self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
-            return
-
-        # Only pop from queue when we're ready to play
-        song = self.queue.popleft()
-        self.current = song
-
+        self._playing_lock = True
+        
         try:
-            # Start pre-fetching next song if available
-            if self.queue:
-                next_song = self.queue[0]
-                asyncio.create_task(self._prefetch_song(next_song))
+            if self.loop and self.loop_song:
+                await self.play_loop_song()
+                return
 
-            audio = discord.FFmpegPCMAudio(
-                song['url'],
-                **FFMPEG_OPTIONS
-            )
-            self.voice_client.play(audio, after=lambda e: 
-                asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop))
-            await self.ctx.send(embed=await self.get_queue_display())
-        except Exception as e:
-            error_embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=f"{song['title']}: {str(e)}",
-                color=COLORS['ERROR']
-            )
-            await self.ctx.send(embed=error_embed)
-            await self.play_next()
+            if not self.queue:
+                if not self.voice_client:
+                    embed = discord.Embed(
+                        description=MESSAGES['GOODBYE'],
+                        color=COLORS['WARNING']
+                    )
+                    await self.ctx.send(embed=embed)
+                    await self.cleanup()
+                else:
+                    embed = discord.Embed(
+                        description=MESSAGES['QUEUE_EMPTY'],
+                        color=COLORS['WARNING']
+                    )
+                    await self.ctx.send(embed=embed)
+                    
+                    if self.disconnect_task:
+                        self.disconnect_task.cancel()
+                    
+                    self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
+                return
+
+            # Only pop from queue when we're ready to play
+            song = self.queue.popleft()
+            self.current = song
+
+            try:
+                if self.queue:
+                    next_song = self.queue[0]
+                    asyncio.create_task(self._prefetch_song(next_song))
+
+                audio = discord.FFmpegPCMAudio(
+                    song['url'],
+                    **FFMPEG_OPTIONS
+                )
+                
+                def after_callback(error):
+                    if error:
+                        print(f"Error in playback: {error}")
+                    # Use create_task instead of run_coroutine_threadsafe
+                    asyncio.create_task(self.play_next())
+                
+                self.voice_client.play(audio, after=after_callback)
+                await self.ctx.send(embed=await self.get_queue_display())
+                
+            except Exception as e:
+                error_embed = discord.Embed(
+                    title=MESSAGES['ERROR_TITLE'],
+                    description=f"{song['title']}: {str(e)}",
+                    color=COLORS['ERROR']
+                )
+                await self.ctx.send(embed=error_embed)
+                self._playing_lock = False
+                await self.play_next()
+        finally:
+            self._playing_lock = False
 
     async def skip(self):
         """Passe à la chanson suivante"""
