@@ -22,8 +22,8 @@ YTDL_OPTIONS = {
 
 # Configuration FFMPEG
 FFMPEG_OPTIONS = {
-    'options': '-vn -loglevel quiet',
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2 -analyzeduration 0 -probesize 32768',
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2',
+    'options': '-vn',
     'stderr': subprocess.DEVNULL
 }
 
