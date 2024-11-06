@@ -228,7 +228,7 @@ class MusicPlayer:
                     self.queue.append(song)
                     await self.processing_queue.put(song)
 
-            # Send confirmation message
+            # Send confirmation message without the "Prochaine Chanson" embed
             if total_songs_added > 0:
                 message = (MESSAGES['PLAYLIST_ADDED'].format(total_songs_added) 
                           if total_songs_added > 1 
@@ -423,8 +423,8 @@ class MusicPlayer:
                 inline=False
             )
         
-        # Show next three songs
-        if self.queue:
+        # Show next three songs only if something is currently playing
+        if self.queue and self.current:
             next_songs = list(self.queue)[:3]
             next_songs_text = "\n".join(
                 f"{i+1}. {song['title']} {format_duration(song.get('duration', 0))}"
@@ -855,9 +855,13 @@ class MusicPlayer:
             if not self.voice_client.is_playing():
                 await self.play_next()
             else:
-                # Update queue display
-                await self.ctx.send(embed=await self.get_queue_display())
-
+                # Optionally, send a simple confirmation message
+                embed = discord.Embed(
+                    description=MESSAGES['SONGS_ADDED'].format(total=len(self.queue)),
+                    color=COLORS['SUCCESS']
+                )
+                await self.ctx.send(embed=embed)
+        
         except Exception as e:
             error_embed = discord.Embed(
                 title=MESSAGES['ERROR_TITLE'],
