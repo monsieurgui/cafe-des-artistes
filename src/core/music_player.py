@@ -196,6 +196,8 @@ class MusicPlayer:
                 queries = self.batch_queue.copy()
                 self.batch_queue.clear()
             
+            total_songs_added = 0
+            
             for query in queries:
                 info = await asyncio.get_event_loop().run_in_executor(
                     self.thread_pool,
@@ -205,6 +207,7 @@ class MusicPlayer:
                 
                 if 'entries' in info:  # Playlist
                     entries = [e for e in info['entries'] if e]
+                    total_songs_added += len(entries)
                     for entry in entries:
                         song = {
                             'url': f"https://www.youtube.com/watch?v={entry['id']}",
@@ -215,6 +218,7 @@ class MusicPlayer:
                         self.queue.append(song)
                         await self.processing_queue.put(song)
                 else:  # Single video
+                    total_songs_added += 1
                     song = {
                         'url': info['webpage_url'],
                         'title': info['title'],
@@ -223,10 +227,18 @@ class MusicPlayer:
                     }
                     self.queue.append(song)
                     await self.processing_queue.put(song)
-            
-            # Update queue display only once after batch processing
-            if queries:
-                await self.ctx.send(embed=await self.get_queue_display())
+
+            # Send confirmation message
+            if total_songs_added > 0:
+                message = (MESSAGES['PLAYLIST_ADDED'].format(total_songs_added) 
+                          if total_songs_added > 1 
+                          else MESSAGES['SONG_ADDED'])
+                
+                embed = discord.Embed(
+                    description=message,
+                    color=COLORS['SUCCESS']
+                )
+                await self.ctx.send(embed=embed)
                 
                 # Start playing if nothing is playing
                 if not self.voice_client.is_playing():
