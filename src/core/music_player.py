@@ -488,6 +488,17 @@ class MusicPlayer:
             except:
                 pass
         
+        # Reset all state variables
+        self.current = None
+        self.queue.clear()
+        self._playing_lock = False if hasattr(self, '_playing_lock') else False
+        self.loop = False
+        self.loop_message = None
+        self.loop_song = None
+        self.loop_start_time = None
+        self.loop_user = None
+        self.loop_task = None
+        
         # Nettoie le cache mémoire
         gc.collect()
         

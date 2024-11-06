@@ -11,6 +11,9 @@ class Music(commands.Cog):
         """Récupère ou crée un lecteur de musique pour le serveur"""
         if ctx.guild.id not in self.bot.music_players:
             self.bot.music_players[ctx.guild.id] = MusicPlayer(self.bot, ctx)
+        else:
+            # Update context for existing player
+            self.bot.music_players[ctx.guild.id].ctx = ctx
         return self.bot.music_players[ctx.guild.id]
 
     @commands.command(name='p', aliases=['play'])
