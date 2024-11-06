@@ -827,6 +827,7 @@ class MusicPlayer:
                 query
             )
             
+            total_songs_added = 0
             if 'entries' in info:  # Playlist
                 entries = [e for e in info['entries'] if e]
                 for _ in range(repeat_count):
@@ -839,6 +840,7 @@ class MusicPlayer:
                         }
                         self.queue.append(song)
                         await self.processing_queue.put(song)
+                        total_songs_added += 1
             else:  # Single video
                 song_template = {
                     'url': info['webpage_url'],
@@ -850,13 +852,18 @@ class MusicPlayer:
                     song = song_template.copy()
                     self.queue.append(song)
                     await self.processing_queue.put(song)
+                    total_songs_added += 1
+            
+            # Send confirmation message
+            embed = discord.Embed(
+                description=MESSAGES['PLAYLIST_ADDED'].format(total_songs_added),
+                color=COLORS['SUCCESS']
+            )
+            await self.ctx.send(embed=embed)
             
             # Start playing if nothing is playing
             if not self.voice_client.is_playing():
                 await self.play_next()
-            else:
-                # Update queue display
-                await self.ctx.send(embed=await self.get_queue_display())
 
         except Exception as e:
             error_embed = discord.Embed(
