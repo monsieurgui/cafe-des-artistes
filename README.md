@@ -10,6 +10,10 @@ Bot musical Discord développé spécifiquement pour le serveur Café des Artist
 - `!loop`: Active/désactive la lecture en boucle
 - `!quit`: Arrête la musique et déconnecte le bot
 
+### Diffusion en Direct
+- `!live <lien>`: Démarre une diffusion en direct
+- `!stop`: Arrête la diffusion en direct
+
 ### File d'attente
 - `!queue`: Affiche les 10 prochaines chansons
 - `!queue all`: Affiche toute la file d'attente

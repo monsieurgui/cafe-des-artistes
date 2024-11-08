@@ -20,6 +20,26 @@ YTDL_OPTIONS = {
     'preferredquality': '192'  # Paramètre de qualité ajouté
 }
 
+YTDL_OPTIONS_LIVE = {
+    'format': 'best',
+    'extractaudio': True,
+    'audioformat': 'mp3',
+    'noplaylist': True,
+    'nocheckcertificate': True,
+    'ignoreerrors': False,
+    'quiet': True,
+    'no_warnings': True,
+    'extract_flat': False,
+    'lazy_playlist': False,
+    'postprocessor_hooks': [],
+    'concurrent_fragment_downloads': 3,
+    'live_from_start': True,
+    'wait_for_video': True,
+    'source_address': '0.0.0.0',
+    'is_live': True,
+    'live_buffer': 1800,
+}
+
 # Configuration FFMPEG
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2',
@@ -64,4 +84,8 @@ MESSAGES = {
     'CLEANUP_START': "🧹 Nettoyage en cours...",
     'CLEANUP_COMPLETE': "✨ Nettoyage complet effectué!",
     'CLEANUP_ERROR': "Erreur lors du nettoyage: {}",
+    'LIVE_STARTED': "🔴 Diffusion en direct démarrée",
+    'LIVE_STOPPED': "⭕ Diffusion en direct arrêtée",
+    'LIVE_ERROR': "❌ Erreur lors du chargement du direct",
+    'LIVE_NOT_FOUND': "❌ Aucune diffusion en direct trouvée",
 }

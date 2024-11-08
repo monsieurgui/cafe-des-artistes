@@ -38,6 +38,9 @@ class MusicPlayer:
         batch_queue (list): File d'attente pour les additions par lots
         batch_task (Task): Tâche pour les additions par lots
         batch_lock (Lock): Verrou pour les additions par lots
+        live_stream (dict): Informations de la diffusion en direct
+        live_embed (Message): Embed de la diffusion en direct
+        live_task (Task): Tâche pour la mise à jour de l'embed de la diffusion en direct
     """
     
     def __init__(self, bot, ctx):
@@ -67,6 +70,9 @@ class MusicPlayer:
         self.batch_queue = []
         self.batch_task = None
         self.batch_lock = asyncio.Lock()
+        self.live_stream = None
+        self.live_embed = None
+        self.live_task = None
         
     async def ensure_voice_client(self):
         """
@@ -928,3 +934,89 @@ class MusicPlayer:
                     )
         except Exception as e:
             print(f"Prefetch error: {e}")
+
+    async def start_live(self, url):
+        """Start a live stream"""
+        try:
+            # Stop current playback and clear queue
+            if self.voice_client and self.voice_client.is_playing():
+                self.voice_client.stop()
+            self.queue.clear()
+            
+            # Ensure voice connection
+            await self.ensure_voice_client()
+            
+            # Extract live stream info
+            loop = asyncio.get_running_loop()
+            info = await loop.run_in_executor(
+                self.thread_pool,
+                lambda: self.bot.ytdl.extract_info(url, download=False)
+            )
+            
+            if not info.get('is_live', False):
+                raise ValueError(MESSAGES['LIVE_NOT_FOUND'])
+                
+            # Store live stream info
+            self.live_stream = {
+                'url': info['url'],
+                'title': info['title'],
+                'start_time': discord.utils.utcnow()
+            }
+            
+            # Create and send live embed
+            self.live_embed = await self._create_live_embed()
+            self.live_embed = await self.ctx.send(embed=self.live_embed)
+            
+            # Start live stream
+            audio = discord.FFmpegPCMAudio(
+                self.live_stream['url'],
+                **FFMPEG_OPTIONS,
+                executable=self.bot.config.get('ffmpeg_path', 'ffmpeg')
+            )
+            self.voice_client.play(audio)
+            
+            # Start update task
+            self.live_task = asyncio.create_task(self._update_live_embed())
+            
+        except Exception as e:
+            await self.stop_live()
+            raise ValueError(f"{MESSAGES['LIVE_ERROR']}: {str(e)}")
+            
+    async def stop_live(self):
+        """Stop the live stream"""
+        if self.live_stream:
+            if self.voice_client and self.voice_client.is_playing():
+                self.voice_client.stop()
+            if self.live_task:
+                self.live_task.cancel()
+            if self.live_embed:
+                await self.live_embed.delete()
+            self.live_stream = None
+            self.live_embed = None
+            self.live_task = None
+            
+    async def _create_live_embed(self):
+        """Create the live stream embed"""
+        if not self.live_stream:
+            return None
+            
+        embed = discord.Embed(
+            title=f"🔴 {self.live_stream['title']}",
+            color=COLORS['ERROR']  # Red color for live
+        )
+        duration = discord.utils.utcnow() - self.live_stream['start_time']
+        embed.add_field(
+            name="En direct depuis",
+            value=self._format_duration(int(duration.total_seconds()))
+        )
+        return embed
+        
+    async def _update_live_embed(self):
+        """Update the live embed every second"""
+        try:
+            while self.live_stream and self.live_embed:
+                embed = await self._create_live_embed()
+                await self.live_embed.edit(embed=embed)
+                await asyncio.sleep(1)
+        except asyncio.CancelledError:
+            pass

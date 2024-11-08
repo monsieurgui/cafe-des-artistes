@@ -20,6 +20,7 @@ class Music(commands.Cog):
     async def play(self, ctx, *, query):
         """Joue une chanson ou une playlist depuis YouTube"""
         player = self.get_music_player(ctx)
+        await player.stop_live()  # Stop live if running
         await player.add_to_queue(query)
 
     @commands.command(name='s', aliases=['skip'])
@@ -135,6 +136,10 @@ class Music(commands.Cog):
                 "!loop": "Active/désactive la lecture en boucle",
                 "!quit": "Arrête la musique et déconnecte le bot"
             },
+            "Diffusion en Direct": {
+                "!live <lien>": "Démarre une diffusion en direct",
+                "!stop": "Arrête la diffusion en direct"
+            },
             "File d'attente": {
                 "!queue": "Affiche les 10 prochaines chansons",
                 "!queue all": "Affiche toute la file d'attente",
@@ -148,7 +153,15 @@ class Music(commands.Cog):
         
         for category, commands in commands_info.items():
             command_text = "\n".join(f"`{cmd}`: {desc}" for cmd, desc in commands.items())
-            embed.add_field(name=f"📑 {category}", value=command_text, inline=False)
+            # Using different emojis for each category
+            category_emojis = {
+                "Lecture": "📀",
+                "Diffusion en Direct": "🔴",
+                "File d'attente": "📋",
+                "Administration": "⚙️"
+            }
+            emoji = category_emojis.get(category, "📑")
+            embed.add_field(name=f"{emoji} {category}", value=command_text, inline=False)
         
         embed.set_footer(text="Bot développé avec ❤️ pour le Café des Artistes")
         await ctx.send(embed=embed)
@@ -157,6 +170,7 @@ class Music(commands.Cog):
     async def loop(self, ctx, *, query=None):
         """Active/désactive le mode boucle pour la chanson actuelle ou démarre la boucle d'une nouvelle chanson"""
         player = self.get_music_player(ctx)
+        await player.stop_live()  # Stop live if running
         await player.toggle_loop(ctx, query)
 
     @commands.command(name='p5')
@@ -212,6 +226,22 @@ class Music(commands.Cog):
                 color=COLORS['ERROR']
             )
             await ctx.send(embed=embed)
+
+    @commands.command(name='live')
+    async def live(self, ctx, *, url):
+        """Démarre une diffusion en direct"""
+        player = self.get_music_player(ctx)
+        await player.start_live(url)
+        
+    @commands.command(name='stop')
+    async def stop(self, ctx):
+        """Arrête la diffusion en direct"""
+        player = self.get_music_player(ctx)
+        await player.stop_live()
+        await ctx.send(embed=discord.Embed(
+            description=MESSAGES['LIVE_STOPPED'],
+            color=COLORS['WARNING']
+        ))
 
 async def setup(bot):
     """Configure le cog de musique"""
