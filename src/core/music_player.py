@@ -73,17 +73,28 @@ class MusicPlayer:
         Vérifie et établit une connexion vocale si nécessaire
         """
         try:
-            if not self.voice_client:
-                if self.ctx.voice_client:
-                    self.voice_client = self.ctx.voice_client
-                elif self.ctx.author.voice:
-                    self.voice_client = await self.ctx.author.voice.channel.connect(
-                        timeout=60.0,
-                        reconnect=True,
-                        self_deaf=True
-                    )
-                else:
-                    raise ValueError(MESSAGES['VOICE_CHANNEL_REQUIRED'])
+            # Check if current voice client is valid
+            if self.voice_client and self.voice_client.is_connected():
+                return
+                
+            # Clear any existing invalid voice client
+            self.voice_client = None
+            
+            # Try to get voice client from context
+            if self.ctx.voice_client and self.ctx.voice_client.is_connected():
+                self.voice_client = self.ctx.voice_client
+                return
+                
+            # Try to connect to author's voice channel
+            if self.ctx.author.voice:
+                self.voice_client = await self.ctx.author.voice.channel.connect(
+                    timeout=60.0,
+                    reconnect=True,
+                    self_deaf=True
+                )
+                return
+                
+            raise ValueError(MESSAGES['VOICE_CHANNEL_REQUIRED'])
 
         except Exception as e:
             print(f"Voice client initialization error: {str(e)}")
@@ -483,6 +494,15 @@ class MusicPlayer:
 
     async def cleanup(self):
         """Nettoie les ressources et les fichiers téléchargés"""
+        # Ensure voice client is properly handled
+        if self.voice_client:
+            try:
+                if self.voice_client.is_connected():
+                    await self.voice_client.disconnect()
+            except:
+                pass
+            self.voice_client = None
+        
         # Annule la tâche de traitement
         if self.processing_task:
             self.processing_task.cancel()
