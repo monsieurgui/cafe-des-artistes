@@ -171,15 +171,14 @@ class Music(commands.Cog):
         player = self.get_music_player(ctx)
         await player.add_multiple_to_queue(query, 10)
 
-    @commands.command(name='cleanup', help='Force le nettoyage des ressources du bot')
-    @commands.has_permissions(administrator=True)  # Only administrators can use this command
-    async def force_cleanup(self, ctx):
+    @commands.command(name='cleanup', aliases=['clean'], help='Force le nettoyage des ressources')
+    async def cleanup(self, ctx):
         """Force le nettoyage des ressources du bot"""
         try:
             player = self.get_music_player(ctx)
             
             # Send initial message
-            status_msg = await ctx.send("🧹 Nettoyage en cours...")
+            status_msg = await ctx.send(MESSAGES['CLEANUP_START'])
             
             # Clear queue and stop playback
             player.queue.clear()
@@ -200,7 +199,7 @@ class Music(commands.Cog):
             
             # Update status message
             embed = discord.Embed(
-                description="✨ Nettoyage complet effectué!",
+                description=MESSAGES['CLEANUP_COMPLETE'],
                 color=COLORS['SUCCESS']
             )
             await status_msg.edit(content=None, embed=embed)
@@ -209,7 +208,7 @@ class Music(commands.Cog):
             # Send error message if cleanup fails
             embed = discord.Embed(
                 title=MESSAGES['ERROR_TITLE'],
-                description=f"Erreur lors du nettoyage: {str(e)}",
+                description=MESSAGES['CLEANUP_ERROR'].format(str(e)),
                 color=COLORS['ERROR']
             )
             await ctx.send(embed=embed)
