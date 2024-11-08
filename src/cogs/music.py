@@ -120,36 +120,37 @@ class Music(commands.Cog):
         )
         await ctx.send(embed=embed)
 
-    @commands.command(name='help', aliases=['h'])
+    @commands.command(name='h', aliases=['help'], help='Affiche ce message d\'aide')
     async def help(self, ctx):
-        """Affiche toutes les commandes disponibles"""
+        """Affiche la liste des commandes disponibles"""
         embed = discord.Embed(
-            title="🎵 Café des Artistes - Commandes",
-            description="Voici la liste des commandes disponibles:",
+            title="🎵 Commandes du Bot Musical",
             color=COLORS['INFO']
         )
         
-        commands_list = {
-            "!p ou !play": "Jouer une chanson ou une liste de lecture YouTube",
-            "!p5": "Jouer une chanson ou une playlist 5 fois",
-            "!p10": "Jouer une chanson ou une playlist 10 fois",
-            "!s ou !skip": "Passer à la chanson suivante",
-            "!q ou !queue": "Afficher la file d'attente actuelle",
-            "!queue all": "Afficher la file complète avec pagination",
-            "!purge": "Vider la file d'attente",
-            "!l ou !loop": "Activer/désactiver la lecture en boucle",
-            "!quit": "Quitter le canal vocal et vider la file d'attente",
-            "!h ou !help": "Afficher cette liste de commandes",
-            "!support": "Envoyer un message au propriétaire du bot"
+        commands_info = {
+            "Lecture": {
+                "!p <lien/recherche>": "Joue une chanson ou ajoute à la queue",
+                "!skip": "Passe à la chanson suivante",
+                "!loop": "Active/désactive la lecture en boucle",
+                "!quit": "Arrête la musique et déconnecte le bot"
+            },
+            "File d'attente": {
+                "!queue": "Affiche les 10 prochaines chansons",
+                "!queue all": "Affiche toute la file d'attente",
+                "!purge": "Vide la file d'attente"
+            },
+            "Administration": {
+                "!cleanup": "Force le nettoyage des ressources (Admin)",
+                "!support <message>": "Envoie un message au support"
+            }
         }
         
-        for command, description in commands_list.items():
-            embed.add_field(
-                name=command,
-                value=description,
-                inline=False
-            )
-            
+        for category, commands in commands_info.items():
+            command_text = "\n".join(f"`{cmd}`: {desc}" for cmd, desc in commands.items())
+            embed.add_field(name=f"📑 {category}", value=command_text, inline=False)
+        
+        embed.set_footer(text="Bot développé avec ❤️ pour le Café des Artistes")
         await ctx.send(embed=embed)
 
     @commands.command(name='l', aliases=['loop'])
@@ -169,6 +170,49 @@ class Music(commands.Cog):
         """Joue une chanson ou une playlist 10 fois"""
         player = self.get_music_player(ctx)
         await player.add_multiple_to_queue(query, 10)
+
+    @commands.command(name='cleanup', help='Force le nettoyage des ressources du bot')
+    @commands.has_permissions(administrator=True)  # Only administrators can use this command
+    async def force_cleanup(self, ctx):
+        """Force le nettoyage des ressources du bot"""
+        try:
+            player = self.get_music_player(ctx)
+            
+            # Send initial message
+            status_msg = await ctx.send("🧹 Nettoyage en cours...")
+            
+            # Clear queue and stop playback
+            player.queue.clear()
+            if player.voice_client and player.voice_client.is_playing():
+                player.voice_client.stop()
+            
+            # Cancel any pending tasks
+            if player.disconnect_task:
+                player.disconnect_task.cancel()
+                player.disconnect_task = None
+                
+            if player.loop_task:
+                player.loop_task.cancel()
+                player.loop_task = None
+                
+            # Force cleanup
+            await player.cleanup()
+            
+            # Update status message
+            embed = discord.Embed(
+                description="✨ Nettoyage complet effectué!",
+                color=COLORS['SUCCESS']
+            )
+            await status_msg.edit(content=None, embed=embed)
+            
+        except Exception as e:
+            # Send error message if cleanup fails
+            embed = discord.Embed(
+                title=MESSAGES['ERROR_TITLE'],
+                description=f"Erreur lors du nettoyage: {str(e)}",
+                color=COLORS['ERROR']
+            )
+            await ctx.send(embed=embed)
 
 async def setup(bot):
     """Configure le cog de musique"""

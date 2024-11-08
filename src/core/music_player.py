@@ -494,50 +494,67 @@ class MusicPlayer:
 
     async def cleanup(self):
         """Nettoie les ressources et les fichiers téléchargés"""
-        # Ensure voice client is properly handled
-        if self.voice_client:
-            try:
-                if self.voice_client.is_connected():
-                    await self.voice_client.disconnect()
-            except:
-                pass
-            self.voice_client = None
-        
-        # Annule la tâche de traitement
-        if self.processing_task:
-            self.processing_task.cancel()
-            self.processing_task = None
-        
-        # Arrête le pool de threads
-        if hasattr(self, 'thread_pool') and not self.thread_pool._shutdown:
-            self.thread_pool.shutdown(wait=False)
-        self.thread_pool = None  # Allow for recreation
-        
-        # Nettoie les fichiers téléchargés
-        if hasattr(self, 'current_file'):
-            try:
-                os.remove(self.current_file)
-            except:
-                pass
-        
-        # Reset all state variables
-        self.current = None
-        self.queue.clear()
-        self._playing_lock = False if hasattr(self, '_playing_lock') else False
-        self.loop = False
-        self.loop_message = None
-        self.loop_song = None
-        self.loop_start_time = None
-        self.loop_user = None
-        self.loop_task = None
-        
-        # Nettoie le cache mémoire
-        gc.collect()
-        
-        # Déconnexion du vocal
-        if self.voice_client:
-            await self.voice_client.disconnect()
-            self.voice_client = None
+        try:
+            # Cancel all tasks first
+            if self.processing_task:
+                self.processing_task.cancel()
+                self.processing_task = None
+                
+            if self.batch_task:
+                self.batch_task.cancel()
+                self.batch_task = None
+                
+            if self.loop_task:
+                self.loop_task.cancel()
+                self.loop_task = None
+                
+            if self.disconnect_task:
+                self.disconnect_task.cancel()
+                self.disconnect_task = None
+            
+            # Clear all queues
+            self.queue.clear()
+            self.batch_queue.clear()
+            if hasattr(self, 'preload_queue'):
+                self.preload_queue.clear()
+            
+            # Handle voice client
+            if self.voice_client:
+                try:
+                    if self.voice_client.is_playing():
+                        self.voice_client.stop()
+                    if self.voice_client.is_connected():
+                        await self.voice_client.disconnect()
+                except:
+                    pass
+                self.voice_client = None
+            
+            # Stop thread pool
+            if hasattr(self, 'thread_pool') and not self.thread_pool._shutdown:
+                self.thread_pool.shutdown(wait=False)
+            self.thread_pool = None
+            
+            # Clear all state variables
+            self.current = None
+            self._playing_lock = False if hasattr(self, '_playing_lock') else False
+            self.loop = False
+            self.loop_message = None
+            self.loop_song = None
+            self.loop_start_time = None
+            self.loop_user = None
+            
+            # Clear caches
+            if hasattr(self, '_cached_urls'):
+                self._cached_urls.clear()
+            if hasattr(self, '_song_cache'):
+                self._song_cache.clear()
+            
+            # Force garbage collection
+            gc.collect()
+            
+        except Exception as e:
+            print(f"Error during cleanup: {e}")
+            raise
 
     async def preload_next_songs(self):
         """

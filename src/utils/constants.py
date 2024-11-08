@@ -60,5 +60,8 @@ MESSAGES = {
     'LOOP_DISABLED': "➡️ Mode boucle désactivé",
     'LOOP_SINCE': "Depuis : {}",
     'LOOP_BY': "Loop initié par : {}",
-    'PLAYLIST_ERROR': "Impossible de mettre une liste de lecture en boucle. Veuillez fournir un lien vers une seule vidéo."
+    'PLAYLIST_ERROR': "Impossible de mettre une liste de lecture en boucle. Veuillez fournir un lien vers une seule vidéo.",
+    'CLEANUP_START': "🧹 Nettoyage en cours...",
+    'CLEANUP_COMPLETE': "✨ Nettoyage complet effectué!",
+    'CLEANUP_ERROR': "Erreur lors du nettoyage: {}",
 }

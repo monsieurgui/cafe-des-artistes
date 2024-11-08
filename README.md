@@ -1,42 +1,42 @@
-# Café des Artistes - Discord Music Bot
+# Café des Artistes - Bot Musical Discord
 
-A Discord music bot built with discord.py that plays music from YouTube with queue management and playlist support.
+Bot musical Discord développé spécifiquement pour le serveur Café des Artistes.
 
-## Features
+## Commandes
 
-- Play music from YouTube URLs or search queries
-- Queue management with pagination
-- Playlist support
-- Support ticket system
-- Docker support for easy deployment
-- Automatic cleanup of downloaded files
-- Auto-disconnect when alone or inactive
+### Lecture
+- `!p <lien/recherche>`: Joue une chanson ou ajoute à la queue
+- `!skip`: Passe à la chanson suivante
+- `!loop`: Active/désactive la lecture en boucle
+- `!quit`: Arrête la musique et déconnecte le bot
 
-## Commands
+### File d'attente
+- `!queue`: Affiche les 10 prochaines chansons
+- `!queue all`: Affiche toute la file d'attente
+- `!purge`: Vide la file d'attente
 
-- `!p` or `!play` - Play a song or playlist from YouTube
-- `!p5` - Play a song or playlist 5 times
-- `!p10` - Play a song or playlist 10 times
-- `!s` or `!skip` - Skip the current song
-- `!purge` - Clear the music queue
-- `!q` or `!queue` - Display current queue
-- `!help` or `!h` - Display all available commands
-- `!queue all` - Display full queue with pagination
-- `!l` or `!loop` - Toggle loop mode for the current song
-- `!support` - Send a support message to bot owner
+### Administration
+- `!cleanup`: Force le nettoyage des ressources (Admin uniquement)
+- `!support <message>`: Envoie un message au support
 
-## Installation
+## Configuration
 
-### Prerequisites
+1. Copier `config.template.yaml` vers `config.yaml`
+2. Ajouter le token du bot dans `config.yaml`
+3. Configurer les autres paramètres selon les besoins
+
+## Déploiement
+
+### Prérequis
 
 - Python 3.11+
 - FFmpeg
-- Discord Bot Token
+- Token du bot Discord
 
-### Local Setup
+### Installation locale
 
-1. Clone the repository
-2. Create a virtual environment:
+1. Cloner le dépôt
+2. Créer un environnement virtuel:
 
 ```bash
 python -m venv venv
@@ -44,61 +44,50 @@ source venv/bin/activate # Linux/Mac
 venv\Scripts\activate # Windows
 ```
 
-3. Install dependencies:
+3. Installer les dépendances:
 
 ```bash
 pip install -r requirements.txt
 ```
 
-4. Configure the bot:
+4. Configurer le bot:
 
 ```bash
 cp src/config/config.template.yaml src/config/config.yaml
 ```
-Edit `config.yaml` with your bot token and settings.
 
-5. Run the bot:
+5. Exécuter le bot:
 ```bash
 python src/main.py
 ```
 
-### Docker Setup
+### Déploiement avec Docker
 
-1. Configure the bot:
+1. Configurer le bot:
 
 ```bash
 cp src/config/config.template.yaml config.yaml
 ```
 
-2. Build and run with docker-compose:
+2. Construire et exécuter avec docker-compose:
 
 ```bash
 docker-compose up -d
 ```
 
-## Configuration
-
-The bot requires a configuration file (`config.yaml`) with the following settings:
-
-```yaml
-bot_token: "<enter bot token here>"
-command_prefix: "!"
-ffmpeg_path: "/usr/bin/ffmpeg"
-```
-
 ## Maintenance
 
 ### Logs
-Logs are stored in `logs/` directory when running with Docker. Monitor these for issues.
+Les logs sont stockés dans le répertoire `logs/` lors de l'exécution avec Docker. Surveillez-les pour les problèmes.
 
-### Memory Management
-The bot automatically:
-- Cleans up downloaded files after playing
-- Disconnects after 30 minutes of inactivity
-- Has memory limits when running in Docker
+### Gestion de la mémoire
+Le bot se nettoie automatiquement:
+- Après la lecture
+- Après 30 minutes d'inactivité
+- Avec des limites de mémoire lors de l'exécution dans Docker
 
-### Docker Resource Limits
-Memory limits are configured in docker-compose.yml:
+### Limites de ressources Docker
+Les limites de mémoire sont configurées dans docker-compose.yml:
 
 ```yaml
 deploy:
@@ -109,40 +98,40 @@ reservations:
 memory: 256M
 ```
 
-## Troubleshooting
+## Résolution des problèmes
 
-1. **Bot not playing audio**
-   - Ensure FFmpeg is installed
-   - Check bot has proper permissions
-   - Verify voice channel connection
+1. **Le bot ne joue pas de musique**
+   - Vérifiez que FFmpeg est installé
+   - Vérifiez que le bot a les permissions appropriées
+   - Vérifiez la connexion au canal vocal
 
-2. **High memory usage**
-   - Check logs for memory leaks
-   - Verify cleanup is working
-   - Adjust Docker memory limits
+2. **Utilisation excessive de la mémoire**
+   - Vérifiez les logs pour les fuites de mémoire
+   - Vérifiez que le nettoyage fonctionne
+   - Ajustez les limites de mémoire Docker
 
-3. **Connection issues**
-   - Check network connectivity
-   - Verify Discord API status
-   - Review error logs
+3. **Problèmes de connexion**
+   - Vérifiez la connectivité réseau
+   - Vérifiez l'état de l'API Discord
+   - Examinez les logs d'erreurs
 
-## Contributing
+## Contribution
 
-1. Fork the repository
-2. Create a feature branch
-3. Commit changes
-4. Push to the branch
-5. Create a Pull Request
+1. Forker le dépôt
+2. Créer une branche de fonctionnalité
+3. Valider les modifications
+4. Envoyer la branche
+5. Créer une Pull Request
 
-## License
+## Licence
 
 Apache License 2.0
 
 Copyright 2024 Guillaume Lévesque
 
-Licensed under the Apache License, Version 2.0 (the "License");
-you may not use this file except in compliance with the License.
-You may obtain a copy of the License at
+Licencié sous la Licence Apache, Version 2.0 (la "Licence");
+vous ne pouvez pas utiliser ce fichier excepté en conformité avec la Licence.
+Vous pouvez obtenir une copie de la Licence à
 
     http://www.apache.org/licenses/LICENSE-2.0
 
