@@ -58,7 +58,7 @@ COLORS = {
 # Messages du bot
 MESSAGES = {
     'PLAYLIST_ADDED': "✅ {} tounes ajoutées à la queue",
-    'SONGS_ADDED': "✅ {} chansons addées!",
+    'SONGS_ADDED': "✅ {total} chansons ajoutées à la file d\'attente",
     'SONG_ADDED': "✅ Toune ajoutée à la queue",
     'ERROR_TITLE': "❌ Erreur",
     'GOODBYE': "On s'revoit bein tôt mon t'cham! 👋",
@@ -88,4 +88,5 @@ MESSAGES = {
     'LIVE_STOPPED': "⭕ Diffusion en direct arrêtée",
     'LIVE_ERROR': "❌ Erreur lors du chargement du direct",
     'LIVE_NOT_FOUND': "❌ Aucune diffusion en direct trouvée",
+    'PLAYBACK_STOPPED': '⏹️ Lecture arrêtée'
 }

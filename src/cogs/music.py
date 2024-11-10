@@ -235,11 +235,11 @@ class Music(commands.Cog):
         
     @commands.command(name='stop')
     async def stop(self, ctx):
-        """Arrête la diffusion en direct"""
+        """Arrête la lecture en cours"""
         player = self.get_music_player(ctx)
-        await player.stop_live()
+        await player.stop()
         await ctx.send(embed=discord.Embed(
-            description=MESSAGES['LIVE_STOPPED'],
+            description=MESSAGES['PLAYBACK_STOPPED'],
             color=COLORS['WARNING']
         ))
 

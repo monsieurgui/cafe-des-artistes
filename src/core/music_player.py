@@ -535,10 +535,11 @@ class MusicPlayer:
                     pass
                 self.voice_client = None
             
-            # Stop thread pool
-            if hasattr(self, 'thread_pool') and not self.thread_pool._shutdown:
-                self.thread_pool.shutdown(wait=False)
-            self.thread_pool = None
+            # Stop thread pool safely
+            if hasattr(self, 'thread_pool'):
+                if self.thread_pool and not getattr(self.thread_pool, '_shutdown', True):
+                    self.thread_pool.shutdown(wait=False)
+                self.thread_pool = None
             
             # Clear all state variables
             self.current = None
@@ -870,6 +871,8 @@ class MusicPlayer:
                 query
             )
             
+            total_songs_added = 0
+            
             if 'entries' in info:  # Playlist
                 entries = [e for e in info['entries'] if e]
                 for _ in range(repeat_count):
@@ -882,6 +885,7 @@ class MusicPlayer:
                         }
                         self.queue.append(song)
                         await self.processing_queue.put(song)
+                        total_songs_added += 1
             else:  # Single video
                 song_template = {
                     'url': info['webpage_url'],
@@ -893,14 +897,15 @@ class MusicPlayer:
                     song = song_template.copy()
                     self.queue.append(song)
                     await self.processing_queue.put(song)
+                    total_songs_added += 1
             
             # Start playing if nothing is playing
             if not self.voice_client.is_playing():
                 await self.play_next()
             else:
-                # Optionally, send a simple confirmation message
+                # Send confirmation message with correct formatting
                 embed = discord.Embed(
-                    description=MESSAGES['SONGS_ADDED'].format(total=len(self.queue)),
+                    description=MESSAGES['SONGS_ADDED'].format(total=total_songs_added),
                     color=COLORS['SUCCESS']
                 )
                 await self.ctx.send(embed=embed)
@@ -1020,3 +1025,25 @@ class MusicPlayer:
                 await asyncio.sleep(1)
         except asyncio.CancelledError:
             pass
+
+    async def stop(self):
+        """Stops current playback and cleans up"""
+        # Stop loop if active
+        if self.loop:
+            self.loop = False
+            if self.loop_task:
+                self.loop_task.cancel()
+                self.loop_task = None
+            if self.loop_message:
+                await self.loop_message.delete()
+                self.loop_message = None
+            self.loop_song = None
+            self.loop_start_time = None
+            self.loop_user = None
+
+        # Stop live if active
+        await self.stop_live()
+
+        # Stop current playback
+        if self.voice_client and self.voice_client.is_playing():
+            self.voice_client.stop()
