@@ -170,25 +170,9 @@ class MusicPlayer:
             async with self.batch_lock:
                 # Handle loop mode disabling
                 if self.loop:
-                    self.loop = False
-                    if self.loop_task:
-                        self.loop_task.cancel()
-                        self.loop_task = None
-                    if self.loop_message:
-                        await self.loop_message.delete()
-                        self.loop_message = None
-                    self.loop_song = None
-                    self.loop_start_time = None
-                    self.loop_user = None
+                    await self.toggle_loop(self.ctx)  # Use toggle_loop to properly cleanup
+                    await asyncio.sleep(0.5)  # Wait for cleanup to complete
                     
-                    # Set the current looped song as the first in queue
-                    if self.current:
-                        temp_current = self.current.copy()
-                        self.queue.appendleft(temp_current)
-                    
-                    if self.voice_client and self.voice_client.is_playing():
-                        self.voice_client.stop()
-
                 # Add to batch queue
                 self.batch_queue.append(query)
                 
@@ -702,7 +686,7 @@ class MusicPlayer:
         await self.ensure_voice_client()
 
         if self.loop:
-            # Disable loop
+            # Disable loop and properly cleanup
             self.loop = False
             if self.loop_task:
                 self.loop_task.cancel()
@@ -710,9 +694,19 @@ class MusicPlayer:
             if self.loop_message:
                 await self.loop_message.delete()
                 self.loop_message = None
+            
+            # Important: Add current loop song to queue before stopping
+            if self.loop_song:
+                self.queue.appendleft(self.loop_song.copy())
+            
             self.loop_song = None
             self.loop_start_time = None
             self.loop_user = None
+            
+            # Stop current playback to trigger play_next
+            if self.voice_client and self.voice_client.is_playing():
+                self.voice_client.stop()
+            
             await ctx.send(embed=discord.Embed(
                 description=MESSAGES['LOOP_DISABLED'],
                 color=COLORS['INFO']
@@ -740,12 +734,14 @@ class MusicPlayer:
                 self.loop_song = {
                     'url': info.get('webpage_url', query),
                     'title': info.get('title', 'Unknown Title'),
-                    'duration': info.get('duration', 0)
+                    'duration': info.get('duration', 0),
+                    'needs_processing': False  # Important: Set to False since we already processed it
                 }
             elif not self.current:
                 raise ValueError(MESSAGES['NOTHING_PLAYING'])
             else:
                 self.loop_song = self.current.copy()
+                self.loop_song['needs_processing'] = False  # Important: Set to False
 
             # Enable loop before starting playback
             self.loop = True
@@ -768,6 +764,7 @@ class MusicPlayer:
             self.loop = False
             if self.loop_task:
                 self.loop_task.cancel()
+                self.loop_task = None
             error_embed = discord.Embed(
                 title=MESSAGES['ERROR_TITLE'],
                 description=str(e),
