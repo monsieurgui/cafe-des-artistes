@@ -10,6 +10,8 @@ services:
       - ./logs:/app/logs
     environment:
       - TZ=America/Montreal  # Set your timezone
+    labels:
+      - "traefik.enable=false"
     deploy:
       resources:
         limits:
