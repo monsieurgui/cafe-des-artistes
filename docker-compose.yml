@@ -11,14 +11,10 @@ services:
     environment:
       - TZ=America/Montreal  # Set your timezone
     labels:
-      - "traefik.enable=false"
-    deploy:
-      resources:
-        limits:
-          memory: 512M
-        reservations:
-          memory: 256M
+      - "traefik.enable=false"  # Keep as false if Traefik should ignore this service
+    networks:
+      - traefik-network  # Connect to the shared Traefik network
+
 networks:
-  default:
-    name: cafe-des-artistes-net
-    driver: bridge
+  traefik-network:
+    external: true  # Indicates that this network is managed outside this Compose file
