@@ -2,22 +2,20 @@ import subprocess
 
 # Configuration YT-DLP
 YTDL_OPTIONS = {
-    'format': 'bestaudio/best',
-    'extractaudio': True,
-    'audioformat': 'mp3',  # Changé de opus à mp3 pour une meilleure compatibilité
-    'noplaylist': True,  # Ne traite pas les playlists, uniquement les vidéos individuelles
-    'nocheckcertificate': True,
-    'ignoreerrors': False,
+    'format': 'bestaudio',
     'quiet': True,
     'no_warnings': True,
-    'extract_flat': True,  # Extrait uniquement les métadonnées initialement
-    'lazy_playlist': True,  # Extrait les informations vidéo uniquement quand nécessaire
-    'postprocessor_hooks': [],  # Réduit la charge du post-traitement
-    'concurrent_fragment_downloads': 3,  # Télécharge les fragments simultanément
-    'live_from_start': False,  # Ne télécharge pas depuis le début des diffusions en direct
-    'source_address': '0.0.0.0',  # Laisse le système choisir la meilleure interface
-    'preferredcodec': 'mp3',  # Codec préféré ajouté
-    'preferredquality': '192'  # Paramètre de qualité ajouté
+    'extract_flat': False,
+    'skip_download': True,
+    'force_generic_extractor': True,
+    'socket_timeout': 2,
+    'retries': 1,
+    'nocheckcertificate': True,
+    'noplaylist': True,
+    'concurrent_fragment_downloads': 1,
+    'buffersize': 32768,
+    'postprocessors': [],
+    'cachedir': False
 }
 
 YTDL_OPTIONS_LIVE = {
@@ -43,7 +41,7 @@ YTDL_OPTIONS_LIVE = {
 # Configuration FFMPEG
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn -bufsize 32k -ar 48000 -ac 2 -f s16le -acodec pcm_s16le'
+    'options': '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le'
 }
 
 # Couleurs des Embeds Discord

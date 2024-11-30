@@ -157,50 +157,51 @@ class MusicPlayer:
         try:
             # Fast initial metadata extraction
             with yt_dlp.YoutubeDL({
-                'format': 'bestaudio/best',
+                'format': 'bestaudio',
                 'quiet': True,
                 'no_warnings': True,
-                'extract_flat': True,  # Only get metadata
-                'skip_download': True,  # Don't download the video
-                'force_generic_extractor': False,
-                'socket_timeout': 3
+                'extract_flat': False,
+                'skip_download': True,
+                'force_generic_extractor': True,
+                'socket_timeout': 2,
+                'retries': 1
             }) as ydl:
-                # Quick check if it's a playlist
-                if "playlist" in query.lower() or "list=" in query:
-                    # ... existing playlist handling ...
-                    pass
-                else:  # Single video - optimized path
-                    info = await asyncio.get_event_loop().run_in_executor(
-                        None, 
-                        lambda: ydl.extract_info(query, download=False, process=False)
-                    )
-                    
-                    if not info:
-                        raise Exception(MESSAGES['VIDEO_UNAVAILABLE'])
+                # Direct extraction without playlist check for first song
+                info = await asyncio.get_event_loop().run_in_executor(
+                    None, 
+                    lambda: ydl.extract_info(query, download=False)
+                )
+                
+                if not info:
+                    raise Exception(MESSAGES['VIDEO_UNAVAILABLE'])
 
-                    # Add to queue immediately with minimal info
-                    song = {
-                        'url': info.get('url', info.get('webpage_url', query)),
-                        'title': info.get('title', 'Unknown'),
-                        'duration': info.get('duration', 0),
-                        'needs_processing': False  # Skip additional processing
-                    }
-                    self.queue.append(song)
-                    
+                # Add to queue with minimal processing
+                song = {
+                    'url': info.get('url', info.get('webpage_url', query)),
+                    'title': info.get('title', 'Unknown'),
+                    'duration': info.get('duration', 0),
+                    'needs_processing': False
+                }
+                self.queue.append(song)
+                
+                # Start playing immediately if nothing is playing
+                if not self.voice_client or not self.voice_client.is_playing():
+                    await self.play_next()
+                else:
                     embed = discord.Embed(
                         description=MESSAGES['SONG_ADDED'].format(song['title']),
                         color=COLORS['SUCCESS']
                     )
                     await self.ctx.send(embed=embed)
+                    await self.ctx.send(embed=await self.get_queue_display())
                     
-                    # Start playing immediately if nothing is playing
-                    if not self.voice_client.is_playing():
-                        await self.play_next()
-                    else:
-                        await self.ctx.send(embed=await self.get_queue_display())
-                        
         except Exception as e:
-            print(f"Error in batch processing: {e}")
+            error_embed = discord.Embed(
+                title=MESSAGES['ERROR_TITLE'],
+                description=str(e),
+                color=COLORS['ERROR']
+            )
+            await self.ctx.send(embed=error_embed)
 
     def _extract_info(self, query):
         """
