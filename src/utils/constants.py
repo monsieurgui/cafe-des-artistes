@@ -42,9 +42,8 @@ YTDL_OPTIONS_LIVE = {
 
 # Configuration FFMPEG
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 2',
-    'options': '-vn',
-    'stderr': subprocess.DEVNULL
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
+    'options': '-vn -bufsize 32k -ar 48000 -ac 2 -f s16le -acodec pcm_s16le'
 }
 
 # Couleurs des Embeds Discord

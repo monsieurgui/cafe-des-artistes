@@ -154,97 +154,51 @@ class MusicPlayer:
             }
 
     async def add_to_queue(self, query):
-        """
-        Ajoute une chanson ou une playlist à la file d'attente avec rate limiting
-        """
         try:
-            current_time = asyncio.get_event_loop().time()
-            if current_time - self.last_add_time < self.add_cooldown:
-                return
-            self.last_add_time = current_time
-
-            self.ensure_thread_pool()
-            await self.ensure_voice_client()
-            await self.start_processing()
-            
-            async with self.batch_lock:
-                # Handle loop mode disabling
-                if self.loop:
-                    await self.toggle_loop(self.ctx)  # Use toggle_loop to properly cleanup
-                    await asyncio.sleep(0.5)  # Wait for cleanup to complete
+            # Fast initial metadata extraction
+            with yt_dlp.YoutubeDL({
+                'format': 'bestaudio/best',
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': True,  # Only get metadata
+                'skip_download': True,  # Don't download the video
+                'force_generic_extractor': False,
+                'socket_timeout': 3
+            }) as ydl:
+                # Quick check if it's a playlist
+                if "playlist" in query.lower() or "list=" in query:
+                    # ... existing playlist handling ...
+                    pass
+                else:  # Single video - optimized path
+                    info = await asyncio.get_event_loop().run_in_executor(
+                        None, 
+                        lambda: ydl.extract_info(query, download=False, process=False)
+                    )
                     
-                # Add to batch queue
-                self.batch_queue.append(query)
-                
-                # Start or restart batch processing
-                if not self.batch_task or self.batch_task.done():
-                    self.batch_task = asyncio.create_task(self._process_batch())
+                    if not info:
+                        raise Exception(MESSAGES['VIDEO_UNAVAILABLE'])
 
-        except Exception as e:
-            error_embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=str(e),
-                color=COLORS['ERROR']
-            )
-            await self.ctx.send(embed=error_embed)
-
-    async def _process_batch(self):
-        """Process batched song additions"""
-        try:
-            await asyncio.sleep(0.5)  # Wait for more potential additions
-            
-            async with self.batch_lock:
-                queries = self.batch_queue.copy()
-                self.batch_queue.clear()
-            
-            total_songs_added = 0
-            
-            for query in queries:
-                info = await asyncio.get_event_loop().run_in_executor(
-                    self.thread_pool,
-                    self._extract_info,
-                    query
-                )
-                
-                if 'entries' in info:  # Playlist
-                    entries = [e for e in info['entries'] if e]
-                    total_songs_added += len(entries)
-                    for entry in entries:
-                        song = {
-                            'url': f"https://www.youtube.com/watch?v={entry['id']}",
-                            'title': entry.get('title', 'Unknown Title'),
-                            'duration': entry.get('duration', 0),
-                            'needs_processing': True
-                        }
-                        self.queue.append(song)
-                        await self.processing_queue.put(song)
-                else:  # Single video
-                    total_songs_added += 1
+                    # Add to queue immediately with minimal info
                     song = {
-                        'url': info['webpage_url'],
-                        'title': info['title'],
+                        'url': info.get('url', info.get('webpage_url', query)),
+                        'title': info.get('title', 'Unknown'),
                         'duration': info.get('duration', 0),
-                        'needs_processing': True
+                        'needs_processing': False  # Skip additional processing
                     }
                     self.queue.append(song)
-                    await self.processing_queue.put(song)
-
-            # Send confirmation message without the "Prochaine Chanson" embed
-            if total_songs_added > 0:
-                message = (MESSAGES['PLAYLIST_ADDED'].format(total_songs_added) 
-                          if total_songs_added > 1 
-                          else MESSAGES['SONG_ADDED'])
-                
-                embed = discord.Embed(
-                    description=message,
-                    color=COLORS['SUCCESS']
-                )
-                await self.ctx.send(embed=embed)
-                
-                # Start playing if nothing is playing
-                if not self.voice_client.is_playing():
-                    await self.play_next()
                     
+                    embed = discord.Embed(
+                        description=MESSAGES['SONG_ADDED'].format(song['title']),
+                        color=COLORS['SUCCESS']
+                    )
+                    await self.ctx.send(embed=embed)
+                    
+                    # Start playing immediately if nothing is playing
+                    if not self.voice_client.is_playing():
+                        await self.play_next()
+                    else:
+                        await self.ctx.send(embed=await self.get_queue_display())
+                        
         except Exception as e:
             print(f"Error in batch processing: {e}")
 

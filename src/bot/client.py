@@ -5,6 +5,7 @@ from discord.ext import commands
 import yt_dlp
 from utils.config import load_config
 from utils.constants import YTDL_OPTIONS, MESSAGES, COLORS
+import logging
 
 class MusicBot(commands.Bot):
     """
@@ -67,7 +68,10 @@ class MusicBot(commands.Bot):
 
     async def on_ready(self):
         """Appelé lorsque le bot est prêt et connecté"""
-        print(f"Connecté en tant que {self.user}")
+        logger = logging.getLogger(__name__)
+        logger.info(f"Bot connecté en tant que {self.user}")
+        logger.info(f"ID du bot: {self.user.id}")
+        logger.info("Bot prêt à recevoir des commandes!")
 
     async def on_voice_state_update(self, member, before, after):
         """

@@ -15,16 +15,10 @@ import asyncio
 import signal
 import logging
 from bot.client import MusicBot
+from utils.logging_config import setup_logging
 
-# Configuration du système de journalisation avec formatage timestamp
-logging.basicConfig(
-    level=logging.INFO,  # Niveau de journalisation global
-    format='%(asctime)s - %(levelname)s - %(message)s',  # Format avec timestamp
-    handlers=[
-        logging.StreamHandler(),  # Affichage dans la console
-        logging.FileHandler('logs/bot.log')  # Sauvegarde dans un fichier
-    ]
-)
+# Initialize logging configuration
+setup_logging()
 logger = logging.getLogger(__name__)
 
 async def main():
