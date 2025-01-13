@@ -11,55 +11,64 @@ Notes:
     et signal pour gérer proprement l'arrêt du programme.
 """
 
-import asyncio
-import signal
+import os
+import sys
 import logging
-from bot.client import MusicBot
-from utils.logging_config import setup_logging
+import asyncio
+from pathlib import Path
+from dotenv import load_dotenv
+from bot import run_bot
 
-# Initialize logging configuration
-setup_logging()
+# Setup logging
+logging.basicConfig(
+    level=logging.INFO,
+    format='%(asctime)s - %(name)s - %(levelname)s - %(message)s',
+    handlers=[
+        logging.StreamHandler(sys.stdout),
+        logging.FileHandler('bot.log')
+    ]
+)
 logger = logging.getLogger(__name__)
 
-async def main():
-    """
-    Fonction principale asynchrone qui initialise et exécute le bot.
+# Constants
+DEFAULT_CACHE_DIR = "cache"
+DEFAULT_CONFIG = {
+    "command_prefix": "!",
+    "max_queue_size": 100,
+    "download_threads": 3,
+    "buffer_size": 3,
+}
+
+def setup_directories():
+    """Create necessary directories if they don't exist"""
+    directories = [
+        DEFAULT_CACHE_DIR,
+        "logs",
+        "config"
+    ]
     
-    Cette fonction :
-    1. Crée une instance du bot
-    2. Configure les gestionnaires de signaux
-    3. Démarre le bot
-    4. Gère la fermeture propre
-    
-    Raises:
-        Exception: Toute erreur non gérée pendant l'exécution
-    """
-    # Création d'une instance du bot
-    bot = MusicBot()
-    
-    def signal_handler(sig, frame):
-        """
-        Gestionnaire des signaux d'arrêt
-        Permet une fermeture propre du bot lors de l'arrêt du programme
-        """
-        logger.info("Signal d'arrêt reçu...")
-        asyncio.create_task(bot.close())
-    
-    # Configuration des gestionnaires de signaux pour SIGINT (Ctrl+C) et SIGTERM
-    signal.signal(signal.SIGINT, signal_handler)
-    signal.signal(signal.SIGTERM, signal_handler)
-    
+    for directory in directories:
+        Path(directory).mkdir(exist_ok=True)
+        logger.info(f"Ensured directory exists: {directory}")
+
+def main():
     try:
-        # Démarrage du bot avec le jeton d'authentification
-        await bot.start(bot.config['bot_token'])
+        # Load environment variables
+        load_dotenv()
+        token = os.getenv('DISCORD_TOKEN')
+        if not token:
+            raise ValueError("DISCORD_TOKEN not found in environment variables")
+            
+        # Setup directories
+        setup_directories()
+        
+        # Start the bot
+        logger.info("Starting bot...")
+        run_bot(token)
+        
     except Exception as e:
-        # Journalisation des erreurs lors du démarrage
-        logger.error(f"Erreur lors du démarrage du bot : {e}")
-    finally:
-        # Assure la fermeture propre du bot dans tous les cas
-        await bot.close()
+        logger.error(f"Failed to start bot: {e}", exc_info=True)
+        sys.exit(1)
 
 if __name__ == "__main__":
-    # Point d'entrée du programme
-    # Exécute la fonction principale dans une boucle asyncio
-    asyncio.run(main())
+    main()
