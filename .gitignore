@@ -16,20 +16,28 @@ lib64/
 parts/
 sdist/
 var/
+wheels/
 *.egg-info/
 .installed.cfg
 *.egg
 
-# Virtual Environment
-venv/
-ENV/
+# Environment files
+.env
+.env.dev
+.env.prod
+.env.local
+
+# Logs
+*.log
+logs/
+discord_bot.log
 
 # IDE
-.idea/
 .vscode/
+.idea/
 *.swp
 *.swo
 
-# Project specific
-config/config.yaml
-*.log
+# OS
+.DS_Store
+Thumbs.db

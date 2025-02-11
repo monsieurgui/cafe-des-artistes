@@ -1,248 +1,234 @@
 import discord
 from discord.ext import commands
-from core.music_player import MusicPlayer
-from utils.constants import MESSAGES, COLORS
+import logging
+from typing import Optional, List
+import asyncio
 
-class Music(commands.Cog):
-    def __init__(self, bot):
-        self.bot = bot
+from src.utils.url_utils import URLUtils
+from src.utils.audio_utils import AudioUtils
+from src.utils.youtube import YouTubeError
+
+logger = logging.getLogger(__name__)
+
+class MusicCog(commands.Cog):
+    """Music commands for the bot."""
     
-    def get_music_player(self, ctx):
-        """Récupère ou crée un lecteur de musique pour le serveur"""
-        if ctx.guild.id not in self.bot.music_players:
-            self.bot.music_players[ctx.guild.id] = MusicPlayer(self.bot, ctx)
+    def __init__(self, bot: commands.Bot):
+        self.bot = bot
+        self.audio_manager = bot.audio_manager
+        logger.info("MusicCog initialized")
+    
+    async def cog_check(self, ctx: commands.Context) -> bool:
+        """Check if the command can be run in this context."""
+        if not ctx.guild:
+            raise commands.NoPrivateMessage("Music commands can't be used in DMs.")
+        return True
+    
+    @commands.command(name='play', aliases=['p'])
+    async def play(self, ctx: commands.Context, *, query: str):
+        """Play a song from YouTube URL or search query."""
+        logger.info(f"Received play command. Query: {query}")
+        
+        # Connect to voice immediately if not already connected
+        if not ctx.voice_client:
+            if ctx.author.voice:
+                try:
+                    await ctx.send("🔊 Connecting to voice channel...")
+                    voice_client = await ctx.author.voice.channel.connect()
+                    self.audio_manager.voice_clients[ctx.guild.id] = voice_client
+                    logger.info(f"Connected to voice channel: {ctx.author.voice.channel.name}")
+                except Exception as e:
+                    logger.error(f"Failed to connect to voice channel: {str(e)}")
+                    await ctx.send("❌ Failed to connect to voice channel.")
+                    return
+            else:
+                await ctx.send("❌ You must be in a voice channel to play music.")
+                return
+
+        async with ctx.typing():
+            try:
+                # Check if the query is a URL
+                is_url = URLUtils.is_youtube_url(query)
+                logger.info(f"URL check result: {is_url}")
+                
+                if is_url:
+                    # Handle playlist URLs
+                    if URLUtils.is_playlist(query):
+                        logger.info("Detected playlist URL")
+                        await self._handle_playlist(ctx, query)
+                        return
+                    
+                    # Handle single video URL
+                    logger.info("Processing single video URL")
+                    await self.audio_manager.play(ctx, query)
+                    song = self.audio_manager.queue_manager.current
+                    if song:
+                        await ctx.send(f"🎵 Now playing: **{song.title}**")
+                else:
+                    # Search for the song
+                    logger.info("Performing YouTube search")
+                    results = await self.audio_manager.youtube.search(query, limit=1)
+                    if not results:
+                        await ctx.send("❌ No results found.")
+                        return
+                    
+                    video = results[0]
+                    await self.audio_manager.play(ctx, video['webpage_url'])
+                    await ctx.send(f"🎵 Now playing: **{video['title']}**")
+                    
+            except YouTubeError as e:
+                logger.error(f"YouTube error: {str(e)}")
+                await ctx.send(f"❌ {str(e)}")
+            except commands.CommandError as e:
+                logger.error(f"Command error: {str(e)}")
+                await ctx.send(f"❌ {str(e)}")
+            except Exception as e:
+                logger.error(f"Error in play command: {str(e)}")
+                await ctx.send("❌ An error occurred while trying to play the song.")
+    
+    @commands.command(name='search', aliases=['s'])
+    async def search(self, ctx: commands.Context, *, query: str):
+        """Search for a song on YouTube."""
+        async with ctx.typing():
+            try:
+                results = await self.audio_manager.youtube.search(query, limit=5)
+                
+                # Format search results
+                message = "🔎 **Search Results:**\n\n"
+                for i, video in enumerate(results, 1):
+                    duration = AudioUtils.format_duration(video.get('duration'))
+                    message += f"`{i}.` **{video['title']}** ({duration})\n"
+                
+                message += "\nType a number to play a song or `cancel` to cancel."
+                await ctx.send(message)
+                
+                # Wait for user response
+                try:
+                    response = await self.bot.wait_for(
+                        'message',
+                        timeout=30.0,
+                        check=lambda m: m.author == ctx.author and m.channel == ctx.channel
+                    )
+                    
+                    if response.content.lower() == 'cancel':
+                        await ctx.send("Search cancelled.")
+                        return
+                    
+                    try:
+                        choice = int(response.content)
+                        if 1 <= choice <= len(results):
+                            video = results[choice - 1]
+                            await self.audio_manager.play(ctx, video['webpage_url'])
+                            await ctx.send(f"🎵 Now playing: **{video['title']}**")
+                        else:
+                            await ctx.send("❌ Invalid choice.")
+                    except ValueError:
+                        await ctx.send("❌ Please enter a valid number.")
+                        
+                except asyncio.TimeoutError:
+                    await ctx.send("❌ Search timed out.")
+                    
+            except YouTubeError as e:
+                await ctx.send(f"❌ {str(e)}")
+            except Exception as e:
+                logger.error(f"Error in search command: {str(e)}")
+                await ctx.send("❌ An error occurred while searching.")
+    
+    @commands.command(name='skip', aliases=['next'])
+    async def skip(self, ctx: commands.Context):
+        """Skip the current song."""
+        if not ctx.voice_client:
+            await ctx.send("❌ Nothing is playing right now.")
+            return
+        
+        # Use the AudioManager's skip method
+        next_song = await self.audio_manager.skip(ctx)
+        
+        if next_song:
+            await ctx.send(f"⏭️ Skipped to: **{next_song.title}**")
         else:
-            # Update context for existing player
-            self.bot.music_players[ctx.guild.id].ctx = ctx
-        return self.bot.music_players[ctx.guild.id]
-
-    @commands.command(name='p', aliases=['play'])
-    async def play(self, ctx, *, query):
-        """Joue une chanson ou une playlist depuis YouTube"""
-        player = self.get_music_player(ctx)
-        await player.stop_live()  # Stop live if running
-        await player.add_to_queue(query)
-
-    @commands.command(name='s', aliases=['skip'])
-    async def skip(self, ctx):
-        """Passe à la chanson suivante"""
-        player = self.get_music_player(ctx)
-        await player.skip()
-
-    @commands.command(name='purge')
-    async def purge(self, ctx):
-        """Vide la file d'attente de musique"""
-        player = self.get_music_player(ctx)
-        await player.purge()
-
+            await ctx.send("⏭️ Skipped the current song. Queue is now empty.")
+    
     @commands.command(name='queue', aliases=['q'])
-    async def queue(self, ctx, show_all: str = None):
-        """Affiche la file d'attente actuelle"""
-        player = self.get_music_player(ctx)
-        embed, view = await player.get_detailed_queue(show_all == "all")
-        await ctx.send(embed=embed, view=view)
-
-    @commands.command(name='support')
-    async def support(self, ctx, *, message):
-        """Envoie un message de support au propriétaire du bot"""
+    async def queue(self, ctx: commands.Context):
+        """Show the current queue."""
+        current = self.audio_manager.queue_manager.current
+        queue = self.audio_manager.queue_manager.get_queue()
+        
+        if not current and not queue:
+            await ctx.send("📪 The queue is empty.")
+            return
+        
+        # Format the queue message
+        message = "🎵 **Current Queue:**\n\n"
+        
+        if current:
+            duration = AudioUtils.format_duration(current.duration)
+            message += f"**Now Playing:**\n`⫸` {current.title} ({duration})\n\n"
+        
+        if queue:
+            message += "**Up Next:**\n"
+            for i, song in enumerate(queue, 1):
+                duration = AudioUtils.format_duration(song.duration)
+                message += f"`{i}.` {song.title} ({duration})\n"
+        
+        await ctx.send(message)
+    
+    @commands.command(name='clear')
+    async def clear(self, ctx: commands.Context):
+        """Clear the queue."""
+        self.audio_manager.queue_manager.clear()
+        await ctx.send("🗑️ Queue cleared.")
+    
+    @commands.command(name='leave', aliases=['disconnect', 'dc'])
+    async def leave(self, ctx: commands.Context):
+        """Leave the voice channel."""
+        if ctx.voice_client:
+            await self.audio_manager.stop(ctx)
+            await ctx.send("👋 Left the voice channel.")
+        else:
+            await ctx.send("❌ I'm not in a voice channel.")
+    
+    @commands.command(name='pause')
+    async def pause(self, ctx: commands.Context):
+        """Pause the current song."""
+        if ctx.voice_client and ctx.voice_client.is_playing():
+            ctx.voice_client.pause()
+            await ctx.send("⏸️ Paused the current song.")
+        else:
+            await ctx.send("❌ Nothing is playing right now.")
+    
+    @commands.command(name='resume')
+    async def resume(self, ctx: commands.Context):
+        """Resume the current song."""
+        if ctx.voice_client and ctx.voice_client.is_paused():
+            ctx.voice_client.resume()
+            await ctx.send("▶️ Resumed the current song.")
+        else:
+            await ctx.send("❌ Nothing is paused right now.")
+    
+    async def _handle_playlist(self, ctx: commands.Context, url: str):
+        """Handle playing a YouTube playlist."""
         try:
-            # Remplacez ceci par votre ID utilisateur Discord
-            owner_id = 503411896041340949  # Mettez votre ID utilisateur Discord ici
-            owner = await self.bot.fetch_user(owner_id)
+            # Get playlist videos
+            videos = await self.audio_manager.youtube.get_playlist_videos(url)
             
-            embed = discord.Embed(
-                title=MESSAGES['SUPPORT_TITLE'],
-                description=message,
-                color=COLORS['ERROR']
-            )
-            embed.add_field(name="De", value=f"{ctx.author} (ID: {ctx.author.id})")
-            embed.add_field(name="Serveur", value=f"{ctx.guild.name} (ID: {ctx.guild.id})")
-            embed.add_field(name="Canal", value=f"{ctx.channel.name} (ID: {ctx.channel.id})")
+            if not videos:
+                await ctx.send("❌ No videos found in the playlist.")
+                return
             
-            await owner.send(embed=embed)
-            await ctx.author.send(embed=discord.Embed(
-                description=MESSAGES['SUPPORT_SENT'],
-                color=COLORS['SUCCESS']
-            ))
-            await ctx.message.delete()
+            # Add all videos to the queue
+            for video in videos:
+                await self.audio_manager.play(ctx, video['webpage_url'])
             
-        except discord.Forbidden:
-            await ctx.send(embed=discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=MESSAGES['DM_ERROR'],
-                color=COLORS['ERROR']
-            ), delete_after=10)
+            await ctx.send(f"📋 Added {len(videos)} songs from playlist to the queue.")
+            
+        except YouTubeError as e:
+            await ctx.send(f"❌ Error loading playlist: {str(e)}")
         except Exception as e:
-            print(f"Erreur de commande support: {str(e)}")  # Ajout de journalisation pour le débogage
-            await ctx.send(embed=discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=MESSAGES['SUPPORT_ERROR'],
-                color=COLORS['ERROR']
-            ), delete_after=10)
+            logger.error(f"Error handling playlist: {str(e)}")
+            await ctx.send("❌ An error occurred while loading the playlist.")
 
-    @commands.Cog.listener()
-    async def on_command_error(self, ctx, error):
-        """Gère les erreurs de commandes"""
-        if isinstance(error, commands.CommandInvokeError):
-            error = error.original
-        
-        if isinstance(error, ValueError):
-            embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=str(error),
-                color=COLORS['ERROR']
-            )
-            await ctx.send(embed=embed, delete_after=10)
-
-    @commands.command(name='quit', help='Quitte le canal vocal et vide la file d\'attente')
-    async def quit(self, ctx):
-        """Quitte le canal vocal et vide la file d'attente"""
-        player = self.get_music_player(ctx)
-        
-        # Vide la file d'attente
-        player.queue.clear()
-        
-        # Arrête la lecture en cours s'il y en a une
-        if player.voice_client and player.voice_client.is_playing():
-            player.voice_client.stop()
-        
-        # Annule tout minuteur de déconnexion en attente
-        if player.disconnect_task:
-            player.disconnect_task.cancel()
-            player.disconnect_task = None
-        
-        # Nettoie et déconnecte immédiatement
-        await player.cleanup()
-        
-        # Envoie un message de confirmation
-        embed = discord.Embed(
-            description=MESSAGES['GOODBYE'],
-            color=COLORS['WARNING']
-        )
-        await ctx.send(embed=embed)
-
-    @commands.command(name='h', aliases=['help'], help='Affiche ce message d\'aide')
-    async def help(self, ctx):
-        """Affiche la liste des commandes disponibles"""
-        embed = discord.Embed(
-            title="🎵 Commandes du Bot Musical",
-            color=COLORS['INFO']
-        )
-        
-        commands_info = {
-            "Lecture": {
-                "!p <lien/recherche>": "Joue une chanson ou ajoute à la queue",
-                "!skip": "Passe à la chanson suivante",
-                "!loop": "Active/désactive la lecture en boucle",
-                "!quit": "Arrête la musique et déconnecte le bot"
-            },
-            "Diffusion en Direct": {
-                "!live <lien>": "Démarre une diffusion en direct",
-                "!stop": "Arrête la diffusion en direct"
-            },
-            "File d'attente": {
-                "!queue": "Affiche les 10 prochaines chansons",
-                "!queue all": "Affiche toute la file d'attente",
-                "!purge": "Vide la file d'attente"
-            },
-            "Administration": {
-                "!cleanup": "Force le nettoyage des ressources (Admin)",
-                "!support <message>": "Envoie un message au support"
-            }
-        }
-        
-        for category, commands in commands_info.items():
-            command_text = "\n".join(f"`{cmd}`: {desc}" for cmd, desc in commands.items())
-            # Using different emojis for each category
-            category_emojis = {
-                "Lecture": "📀",
-                "Diffusion en Direct": "🔴",
-                "File d'attente": "📋",
-                "Administration": "⚙️"
-            }
-            emoji = category_emojis.get(category, "📑")
-            embed.add_field(name=f"{emoji} {category}", value=command_text, inline=False)
-        
-        embed.set_footer(text="Bot développé avec ❤️ pour le Café des Artistes")
-        await ctx.send(embed=embed)
-
-    @commands.command(name='l', aliases=['loop'])
-    async def loop(self, ctx, *, query=None):
-        """Active/désactive le mode boucle pour la chanson actuelle ou démarre la boucle d'une nouvelle chanson"""
-        player = self.get_music_player(ctx)
-        await player.stop_live()  # Stop live if running
-        await player.toggle_loop(ctx, query)
-
-    @commands.command(name='p5')
-    async def play_five(self, ctx, *, query):
-        """Joue une chanson ou une playlist 5 fois"""
-        player = self.get_music_player(ctx)
-        await player.add_multiple_to_queue(query, 5)
-
-    @commands.command(name='p10')
-    async def play_ten(self, ctx, *, query):
-        """Joue une chanson ou une playlist 10 fois"""
-        player = self.get_music_player(ctx)
-        await player.add_multiple_to_queue(query, 10)
-
-    @commands.command(name='cleanup', aliases=['clean'], help='Force le nettoyage des ressources')
-    async def cleanup(self, ctx):
-        """Force le nettoyage des ressources du bot"""
-        try:
-            player = self.get_music_player(ctx)
-            
-            # Send initial message
-            status_msg = await ctx.send(MESSAGES['CLEANUP_START'])
-            
-            # Clear queue and stop playback
-            player.queue.clear()
-            if player.voice_client and player.voice_client.is_playing():
-                player.voice_client.stop()
-            
-            # Cancel any pending tasks
-            if player.disconnect_task:
-                player.disconnect_task.cancel()
-                player.disconnect_task = None
-                
-            if player.loop_task:
-                player.loop_task.cancel()
-                player.loop_task = None
-                
-            # Force cleanup
-            await player.cleanup()
-            
-            # Update status message
-            embed = discord.Embed(
-                description=MESSAGES['CLEANUP_COMPLETE'],
-                color=COLORS['SUCCESS']
-            )
-            await status_msg.edit(content=None, embed=embed)
-            
-        except Exception as e:
-            # Send error message if cleanup fails
-            embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=MESSAGES['CLEANUP_ERROR'].format(str(e)),
-                color=COLORS['ERROR']
-            )
-            await ctx.send(embed=embed)
-
-    @commands.command(name='live')
-    async def live(self, ctx, *, url):
-        """Démarre une diffusion en direct"""
-        player = self.get_music_player(ctx)
-        await player.start_live(url)
-        
-    @commands.command(name='stop')
-    async def stop(self, ctx):
-        """Arrête la lecture en cours"""
-        player = self.get_music_player(ctx)
-        await player.stop()
-        await ctx.send(embed=discord.Embed(
-            description=MESSAGES['PLAYBACK_STOPPED'],
-            color=COLORS['WARNING']
-        ))
-
-async def setup(bot):
-    """Configure le cog de musique"""
-    await bot.add_cog(Music(bot))
+async def setup(bot: commands.Bot):
+    """Add the cog to the bot."""
+    await bot.add_cog(MusicCog(bot)) 
