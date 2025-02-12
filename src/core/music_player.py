@@ -172,32 +172,28 @@ class MusicPlayer:
                 # Check if query is a URL
                 is_url = query.startswith(('http://', 'https://', 'www.', 'youtube.com', 'youtu.be'))
                 
-                # Fast initial metadata extraction with optimized options
+                # Prepare search query if not a URL
+                search_query = query if is_url else f"ytsearch:{query}"
+                
+                # Use simple ytdl options
                 ytdl_opts = {
-                    'format': 'bestaudio',
+                    'format': 'bestaudio/best',
+                    'default_search': 'ytsearch',
                     'quiet': True,
                     'no_warnings': True,
-                    'extract_flat': False,
-                    'skip_download': True,
-                    'force_generic_extractor': False,
-                    'default_search': 'ytsearch',
                     'noplaylist': True
                 }
                 
-                # Prepare search query if not a URL
-                if not is_url:
-                    query = f"ytsearch:{query}"
-                
                 # Check cache first
-                if query in self._cached_urls:
-                    song = self._cached_urls[query].copy()
+                if search_query in self._cached_urls:
+                    song = self._cached_urls[search_query].copy()
                 else:
                     # Use dedicated search pool
                     try:
                         async with async_timeout.timeout(10):
                             info = await asyncio.get_event_loop().run_in_executor(
                                 self.search_pool, 
-                                lambda: yt_dlp.YoutubeDL(ytdl_opts).extract_info(query, download=False)
+                                lambda: yt_dlp.YoutubeDL(ytdl_opts).extract_info(search_query, download=False)
                             )
                             
                             if not info:
@@ -210,7 +206,7 @@ class MusicPlayer:
                                 info = info['entries'][0]
 
                             song = {
-                                'url': info.get('webpage_url', info.get('url', query)),
+                                'url': info.get('webpage_url', info.get('url', search_query)),
                                 'title': info.get('title', 'Unknown'),
                                 'duration': info.get('duration', 0),
                                 'thumbnail': info.get('thumbnail'),
@@ -219,7 +215,7 @@ class MusicPlayer:
                                 'view_count': info.get('view_count'),
                                 'needs_processing': False
                             }
-                            self._cached_urls[query] = song.copy()
+                            self._cached_urls[search_query] = song.copy()
                     except Exception as e:
                         print(f"Search error: {e}")
                         raise
