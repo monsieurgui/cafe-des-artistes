@@ -175,22 +175,27 @@ class MusicPlayer:
                 # Prepare search query if not a URL
                 search_query = query if is_url else f"ytsearch:{query}"
                 
-                # Use simple ytdl options
+                # Use minimal ytdl options for fast initial search
                 ytdl_opts = {
                     'format': 'bestaudio/best',
-                    'default_search': 'ytsearch',
                     'quiet': True,
                     'no_warnings': True,
-                    'noplaylist': True
+                    'noplaylist': True,
+                    'default_search': 'ytsearch',
+                    'extract_flat': True,  # Only fetch metadata initially
+                    'skip_download': True,
+                    'force_generic_extractor': False,
+                    'socket_timeout': 1,  # Reduced timeout
+                    'retries': 1
                 }
                 
                 # Check cache first
                 if search_query in self._cached_urls:
                     song = self._cached_urls[search_query].copy()
                 else:
-                    # Use dedicated search pool
+                    # Use dedicated search pool with shorter timeout
                     try:
-                        async with async_timeout.timeout(10):
+                        async with async_timeout.timeout(5):  # Reduced timeout
                             info = await asyncio.get_event_loop().run_in_executor(
                                 self.search_pool, 
                                 lambda: yt_dlp.YoutubeDL(ytdl_opts).extract_info(search_query, download=False)
@@ -205,27 +210,23 @@ class MusicPlayer:
                                     raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
                                 info = info['entries'][0]
 
+                            # Create minimal song info initially
                             song = {
                                 'url': info.get('webpage_url', info.get('url', search_query)),
                                 'title': info.get('title', 'Unknown'),
                                 'duration': info.get('duration', 0),
-                                'thumbnail': info.get('thumbnail'),
-                                'webpage_url': info.get('webpage_url'),
-                                'channel': info.get('channel', info.get('uploader')),
-                                'view_count': info.get('view_count'),
-                                'needs_processing': False
+                                'needs_processing': True  # Mark for background processing
                             }
                             self._cached_urls[search_query] = song.copy()
+                            
+                            # Start background processing for full metadata
+                            asyncio.create_task(self._process_song_metadata(song))
                     except Exception as e:
                         print(f"Search error: {e}")
                         raise
 
                 self.queue.append(song)
                 
-                # Start preloading next song if this is the first in queue
-                if len(self.queue) == 1 and not self.current:
-                    self._preload_task = asyncio.create_task(self._preload_next())
-
                 # Start playing immediately if nothing is playing
                 if not self.voice_client or not self.voice_client.is_playing():
                     await self.play_next()
@@ -250,6 +251,29 @@ class MusicPlayer:
                 color=COLORS['ERROR']
             )
             await self.ctx.send(embed=error_embed)
+
+    async def _process_song_metadata(self, song):
+        """Process full song metadata in the background"""
+        try:
+            # Use full options for complete metadata
+            ytdl_opts = YTDL_OPTIONS.copy()
+            info = await asyncio.get_event_loop().run_in_executor(
+                self.thread_pool,
+                lambda: yt_dlp.YoutubeDL(ytdl_opts).extract_info(song['url'], download=False)
+            )
+            
+            if info:
+                # Update song with full metadata
+                song.update({
+                    'thumbnail': info.get('thumbnail'),
+                    'webpage_url': info.get('webpage_url'),
+                    'channel': info.get('channel', info.get('uploader')),
+                    'view_count': info.get('view_count'),
+                    'needs_processing': False
+                })
+                self._cached_urls[song['url']] = song.copy()
+        except Exception as e:
+            print(f"Error processing metadata: {e}")
 
     async def _preload_next(self):
         """Preload the next song in the queue"""
