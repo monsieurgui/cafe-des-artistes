@@ -7,7 +7,7 @@ YTDL_OPTIONS = {
     'no_warnings': True,
     'extract_flat': False,
     'skip_download': True,
-    'force_generic_extractor': True,
+    'force_generic_extractor': False,
     'socket_timeout': 2,
     'retries': 1,
     'nocheckcertificate': True,
@@ -15,7 +15,14 @@ YTDL_OPTIONS = {
     'concurrent_fragment_downloads': 1,
     'buffersize': 32768,
     'postprocessors': [],
-    'cachedir': False
+    'cachedir': False,
+    'extract_flat': False,
+    'writethumbnail': False,
+    'writesubtitles': False,
+    'writeautomaticsub': False,
+    'get_duration': True,
+    'extract_metadata': True,
+    'default_search': 'ytsearch'
 }
 
 YTDL_OPTIONS_LIVE = {

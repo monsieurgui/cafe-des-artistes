@@ -11,6 +11,7 @@ import requests
 import aiohttp
 import async_timeout
 from core.queue_view import QueueView
+from core.now_playing import NowPlayingDisplay
 from utils.constants import YTDL_OPTIONS, FFMPEG_OPTIONS, MESSAGES, COLORS
 
 class MusicPlayer:
@@ -32,6 +33,7 @@ class MusicPlayer:
         voice_client (VoiceClient): Client vocal Discord
         disconnect_task (Task): Tâche de déconnexion automatique
         thread_pool (ThreadPoolExecutor): Pool de threads pour le traitement parallèle
+        search_pool (ThreadPoolExecutor): Pool de threads dédié pour les recherches
         processing_queue (Queue): File d'attente pour le traitement asynchrone
         preload_queue (deque): File d'attente pour le préchargement
         loop (bool): État du mode boucle
@@ -43,6 +45,7 @@ class MusicPlayer:
         live_stream (dict): Informations de la diffusion en direct
         live_embed (Message): Embed de la diffusion en direct
         live_task (Task): Tâche pour la mise à jour de l'embed de la diffusion en direct
+        current_display (NowPlayingDisplay): Instance de la mise en cours de lecture
     """
     
     def __init__(self, bot, ctx):
@@ -57,7 +60,8 @@ class MusicPlayer:
         self.current = None
         self.voice_client = None
         self.disconnect_task = None  # Tâche pour le minuteur de déconnexion
-        self.thread_pool = ThreadPoolExecutor(max_workers=2)  # Limite les téléchargements simultanés
+        self.thread_pool = ThreadPoolExecutor(max_workers=2)  # For playback operations
+        self.search_pool = ThreadPoolExecutor(max_workers=1)  # Dedicated pool for search operations
         self.processing_queue = asyncio.Queue()  # File d'attente pour le traitement en arrière-plan
         self.processing_task = None
         self.preload_queue = deque(maxlen=3)  # Garde les 3 prochaines chansons préchargées
@@ -81,6 +85,7 @@ class MusicPlayer:
         self._processing_lock = asyncio.Lock()
         self._playing_lock = False
         self.session = aiohttp.ClientSession()
+        self.current_display = None
         
     async def ensure_voice_client(self):
         """
@@ -164,38 +169,65 @@ class MusicPlayer:
     async def add_to_queue(self, query):
         try:
             async with self._processing_lock:
+                # Check if query is a URL
+                is_url = query.startswith(('http://', 'https://', 'www.', 'youtube.com', 'youtu.be'))
+                
+                # Prepare search query if not a URL
+                if not is_url:
+                    query = f"ytsearch:{query}"
+                
                 # Fast initial metadata extraction with optimized options
                 ytdl_opts = {
                     'format': 'bestaudio',
                     'quiet': True,
                     'no_warnings': True,
-                    'extract_flat': False,
+                    'extract_flat': True,  # Only fetch metadata
                     'skip_download': True,
-                    'force_generic_extractor': True,
+                    'force_generic_extractor': False,
                     'socket_timeout': 2,
-                    'retries': 1
+                    'retries': 1,
+                    'default_search': 'ytsearch',
+                    'noplaylist': True,
+                    'concurrent_fragment_downloads': 1,
+                    'buffersize': 32768,
+                    'extract_flat': True
                 }
 
                 # Check cache first
                 if query in self._cached_urls:
                     song = self._cached_urls[query].copy()
                 else:
-                    async with async_timeout.timeout(10):
-                        info = await asyncio.get_event_loop().run_in_executor(
-                            self.thread_pool, 
-                            lambda: yt_dlp.YoutubeDL(ytdl_opts).extract_info(query, download=False)
-                        )
-                        
-                        if not info:
-                            raise Exception(MESSAGES['VIDEO_UNAVAILABLE'])
+                    # Use dedicated search pool
+                    try:
+                        async with async_timeout.timeout(10):
+                            info = await asyncio.get_event_loop().run_in_executor(
+                                self.search_pool, 
+                                lambda: yt_dlp.YoutubeDL(ytdl_opts).extract_info(query, download=False)
+                            )
+                            
+                            if not info:
+                                raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
 
-                        song = {
-                            'url': info.get('url', info.get('webpage_url', query)),
-                            'title': info.get('title', 'Unknown'),
-                            'duration': info.get('duration', 0),
-                            'needs_processing': False
-                        }
-                        self._cached_urls[query] = song.copy()
+                            # Handle search results
+                            if not is_url and 'entries' in info:
+                                if not info['entries']:
+                                    raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
+                                info = info['entries'][0]
+
+                            song = {
+                                'url': info.get('url', info.get('webpage_url', query)),
+                                'title': info.get('title', 'Unknown'),
+                                'duration': info.get('duration', 0),
+                                'thumbnail': info.get('thumbnail'),
+                                'webpage_url': info.get('webpage_url'),
+                                'channel': info.get('channel', info.get('uploader')),
+                                'view_count': info.get('view_count'),
+                                'needs_processing': False
+                            }
+                            self._cached_urls[query] = song.copy()
+                    except Exception as e:
+                        print(f"Search error: {e}")
+                        raise
 
                 self.queue.append(song)
                 
@@ -257,8 +289,16 @@ class MusicPlayer:
 
             if not self.queue and not self.loop:
                 self.current = None
-                await self.cleanup()
+                # Start disconnect timer instead of immediate cleanup
+                if self.disconnect_task:
+                    self.disconnect_task.cancel()
+                self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
                 return
+
+            # Stop current display if exists
+            if self.current_display:
+                await self.current_display.stop()
+                self.current_display = None
 
             if self.loop and self.loop_song:
                 next_song = self.loop_song
@@ -285,21 +325,24 @@ class MusicPlayer:
                 await self.play_next()
                 return
 
+            # Store full info for display
             self.current = {
-                'url': next_song['url'],
+                'url': info.get('webpage_url', next_song['url']),  # Use webpage_url first
                 'title': info.get('title', 'Unknown'),
-                'duration': info.get('duration', 0)
+                'duration': info.get('duration', 0),
+                'thumbnail': info.get('thumbnail', info.get('thumbnails', [{'url': None}])[0]['url']),
+                'webpage_url': info.get('webpage_url', info.get('url', next_song['url'])),
+                'channel': info.get('uploader', info.get('channel', 'Unknown')),
+                'view_count': info.get('view_count', 0)
             }
 
-            # Start preloading next song
-            if self.queue:
-                self._preload_task = asyncio.create_task(self._preload_next())
-
-            # Get the stream URL
-            url = info['url']
+            # Get the stream URL (this is different from webpage_url)
+            stream_url = info.get('url', info.get('formats', [{}])[0].get('url'))
+            if not stream_url:
+                raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
             
             # Create FFmpeg audio source
-            audio = FFmpegPCMAudio(url, **FFMPEG_OPTIONS)
+            audio = FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS)
             
             def after_playing(error):
                 if error:
@@ -308,12 +351,9 @@ class MusicPlayer:
 
             self.voice_client.play(audio, after=after_playing)
 
-            # Send now playing message
-            embed = discord.Embed(
-                description=f"{MESSAGES['NOW_PLAYING']}: {self.current['title']}",
-                color=COLORS['SUCCESS']
-            )
-            await self.ctx.send(embed=embed)
+            # Create and start the now playing display
+            self.current_display = NowPlayingDisplay(self.ctx, self.current)
+            await self.current_display.start()
 
         except Exception as e:
             print(f"Error in play_next: {e}")
@@ -328,8 +368,13 @@ class MusicPlayer:
             self._playing_lock = False
 
     async def skip(self):
-        """Passe à la chanson suivante"""
+        """Skip the current song"""
         if self.voice_client and self.voice_client.is_playing():
+            # Stop current display
+            if self.current_display:
+                await self.current_display.stop()
+                self.current_display = None
+                
             # Disable loop if active
             if self.loop:
                 self.loop = False
@@ -367,15 +412,8 @@ class MusicPlayer:
     async def get_queue_display(self):
         embed = discord.Embed(color=COLORS['INFO'])
         
-        def format_duration(seconds):
-            minutes, seconds = divmod(seconds, 60)
-            hours, minutes = divmod(minutes, 60)
-            if hours > 0:
-                return f"`{hours:02d}:{minutes:02d}:{seconds:02d}`"
-            return f"`{minutes:02d}:{seconds:02d}`"
-        
         if self.current:
-            duration = format_duration(self.current.get('duration', 0))
+            duration = self._format_duration(self.current.get('duration', 0))
             embed.add_field(
                 name=MESSAGES['NOW_PLAYING'],
                 value=f"{self.current['title']} {duration}",
@@ -386,7 +424,7 @@ class MusicPlayer:
         if self.queue and self.current:
             next_songs = list(self.queue)[:3]
             next_songs_text = "\n".join(
-                f"{i+1}. {song['title']} {format_duration(song.get('duration', 0))}"
+                f"{i+1}. {song['title']} {self._format_duration(song.get('duration', 0))}"
                 for i, song in enumerate(next_songs)
             )
             embed.add_field(
@@ -477,11 +515,16 @@ class MusicPlayer:
                     pass
                 self.voice_client = None
             
-            # Stop thread pool safely
+            # Stop thread pools safely
             if hasattr(self, 'thread_pool'):
                 if self.thread_pool and not getattr(self.thread_pool, '_shutdown', True):
                     self.thread_pool.shutdown(wait=False)
                 self.thread_pool = None
+                
+            if hasattr(self, 'search_pool'):
+                if self.search_pool and not getattr(self.search_pool, '_shutdown', True):
+                    self.search_pool.shutdown(wait=False)
+                self.search_pool = None
             
             # Clear all state variables
             self.current = None
@@ -504,6 +547,11 @@ class MusicPlayer:
             
             # Force garbage collection
             gc.collect()
+            
+            # Stop current display
+            if self.current_display:
+                await self.current_display.stop()
+                self.current_display = None
             
         except Exception as e:
             print(f"Error during cleanup: {e}")
@@ -530,19 +578,12 @@ class MusicPlayer:
 
     async def get_detailed_queue(self, show_all=False):
         """Obtient l'affichage détaillé de la file d'attente"""
-        def format_duration(seconds):
-            minutes, seconds = divmod(seconds, 60)
-            hours, minutes = divmod(minutes, 60)
-            if hours > 0:
-                return f"`{hours:02d}:{minutes:02d}:{seconds:02d}`"
-            return f"`{minutes:02d}:{seconds:02d}`"
-        
         if not show_all:
             # Comportement original pour !queue
             embed = discord.Embed(title="File d'attente détaillée", color=COLORS['INFO'])
             
             if self.current:
-                duration = format_duration(self.current.get('duration', 0))
+                duration = self._format_duration(self.current.get('duration', 0))
                 embed.add_field(
                     name=MESSAGES['NOW_PLAYING'],
                     value=f"{self.current['title']} {duration}",
@@ -552,7 +593,7 @@ class MusicPlayer:
             queue_list = list(self.queue)[:10]  # Affiche les 10 premières chansons
             if queue_list:
                 queue_text = "\n".join(
-                    f"`{i}.` {song['title']} {format_duration(song.get('duration', 0))}"
+                    f"`{i}.` {song['title']} {self._format_duration(song.get('duration', 0))}"
                     for i, song in enumerate(queue_list, 1)
                 )
                 embed.add_field(
@@ -588,7 +629,7 @@ class MusicPlayer:
                 
                 # Add current song to first page only
                 if page == 0 and self.current:
-                    duration = format_duration(self.current.get('duration', 0))
+                    duration = self._format_duration(self.current.get('duration', 0))
                     embed.add_field(
                         name=MESSAGES['NOW_PLAYING'],
                         value=f"{self.current['title']} {duration}",
@@ -597,7 +638,7 @@ class MusicPlayer:
                 
                 if current_page_songs:
                     queue_text = "\n".join(
-                        f"`{i}.` {song['title']} {format_duration(song.get('duration', 0))}"
+                        f"`{i}.` {song['title']} {self._format_duration(song.get('duration', 0))}"
                         for i, song in enumerate(current_page_songs, start_idx + 1)
                     )
                     embed.add_field(
@@ -619,29 +660,36 @@ class MusicPlayer:
                 
             return pages[0], QueueView(pages) if len(pages) > 1 else None
 
-    def _format_duration(self, seconds: int) -> str:
+    def _format_duration(self, seconds: float) -> str:
         """
         Formate une durée en secondes en format lisible HH:MM:SS.
         
         Args:
-            seconds (int): Nombre de secondes à formater
+            seconds (float): Nombre de secondes à formater
         
         Returns:
             str: Durée formatée en HH:MM:SS ou MM:SS si moins d'une heure
         
         Examples:
-            >>> _format_duration(3665)
+            >>> _format_duration(3665.5)
             '01:01:05'
-            >>> _format_duration(185)
+            >>> _format_duration(185.3)
             '03:05'
         """
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        seconds = int(seconds % 60)
-        
-        if hours > 0:
-            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        return f"{minutes:02d}:{seconds:02d}"
+        if seconds is None:
+            return "00:00"
+            
+        try:
+            seconds = int(float(seconds))
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            seconds = seconds % 60
+            
+            if hours > 0:
+                return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            return f"{minutes:02d}:{seconds:02d}"
+        except (ValueError, TypeError):
+            return "00:00"
 
     async def toggle_loop(self, ctx, query=None):
         """Active/désactive le mode boucle pour la chanson actuelle ou démarre la boucle d'une nouvelle chanson"""
@@ -1040,14 +1088,26 @@ class MusicPlayer:
     def _extract_info(self, query):
         """
         Extract information from YouTube (runs in thread pool)
+        
+        Args:
+            query (str): URL or search query
+            
+        Returns:
+            dict: Video information from YouTube
         """
-        is_url = query.startswith(('http://', 'https://', 'www.'))
+        # Check if query is a URL
+        is_url = query.startswith(('http://', 'https://', 'www.', 'youtube.com', 'youtu.be'))
+        
+        # Prepare search query if not a URL
+        if not is_url:
+            query = f"ytsearch:{query}"
+        
         ydl_opts = {
             'quiet': True,
             'no_warnings': True,
             'extract_flat': 'in_playlist' if is_url else False,
             'format': 'bestaudio/best',
-            'default_search': 'ytsearch' if not is_url else None,
+            'default_search': 'ytsearch',  # Enable YouTube search
             'concurrent_fragments': 5,
             'postprocessor_args': {
                 'ffmpeg': ['-threads', '2']
@@ -1061,5 +1121,16 @@ class MusicPlayer:
             'progress_hooks': [],
             'no_color': True,
         }
+        
         with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(query, download=False)
+            try:
+                info = ydl.extract_info(query, download=False)
+                # If it's a search result, get the first entry
+                if not is_url and 'entries' in info:
+                    if not info['entries']:
+                        raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
+                    return info['entries'][0]
+                return info
+            except Exception as e:
+                print(f"Error extracting info: {e}")
+                raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
