@@ -54,9 +54,15 @@ class MusicBot(commands.Bot):
         # Storage for music players per server
         self.music_players = {}
         
-        # Configure logging
+        # Configure logging - use a safer way to get log level
+        try:
+            log_level = self.config.get('log_level', 'INFO').upper()
+            level = getattr(logging, log_level, logging.INFO)
+        except (AttributeError, KeyError):
+            level = logging.INFO
+            
         logging.basicConfig(
-            level=getattr(logging, self.config['log_level'].upper(), logging.INFO),
+            level=level,
             format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
         )
 
