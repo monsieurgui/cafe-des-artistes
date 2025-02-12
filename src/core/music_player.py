@@ -172,12 +172,21 @@ class MusicPlayer:
                 # Check if query is a URL
                 is_url = query.startswith(('http://', 'https://', 'www.', 'youtube.com', 'youtu.be'))
                 
+                # Fast initial metadata extraction with optimized options
+                ytdl_opts = {
+                    'format': 'bestaudio',
+                    'quiet': True,
+                    'no_warnings': True,
+                    'extract_flat': False,
+                    'skip_download': True,
+                    'force_generic_extractor': False,
+                    'default_search': 'ytsearch',
+                    'noplaylist': True
+                }
+                
                 # Prepare search query if not a URL
                 if not is_url:
                     query = f"ytsearch:{query}"
-                
-                # Fast initial metadata extraction with optimized options
-                ytdl_opts = YTDL_OPTIONS.copy()
                 
                 # Check cache first
                 if query in self._cached_urls:
