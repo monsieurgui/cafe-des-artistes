@@ -178,12 +178,7 @@ class MusicPlayer:
                 
                 # Fast initial metadata extraction with optimized options
                 ytdl_opts = YTDL_OPTIONS.copy()
-                ytdl_opts.update({
-                    'extract_flat': True,  # Only fetch metadata
-                    'force_generic_extractor': False,
-                    'default_search': 'ytsearch'  # Enable YouTube search
-                })
-
+                
                 # Check cache first
                 if query in self._cached_urls:
                     song = self._cached_urls[query].copy()
@@ -200,7 +195,7 @@ class MusicPlayer:
                                 raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
 
                             # Handle search results
-                            if not is_url and 'entries' in info:
+                            if 'entries' in info:
                                 if not info['entries']:
                                     raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
                                 info = info['entries'][0]

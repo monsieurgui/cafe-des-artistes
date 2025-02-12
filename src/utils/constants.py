@@ -21,10 +21,10 @@ YTDL_OPTIONS = {
     'get_duration': True,
     'extract_metadata': True,
     'default_search': 'ytsearch',
-    'source_address': '0.0.0.0',  # IPv6 addresses cause issues sometimes
-    'ignoreerrors': True,  # Don't stop on download errors
-    'no_color': True,  # Disable ANSI color codes
-    'extract_flat': 'in_playlist'  # Extract only video metadata for playlists
+    'source_address': '0.0.0.0',
+    'ignoreerrors': True,
+    'no_color': True,
+    'extract_flat': 'in_playlist'
 }
 
 YTDL_OPTIONS_LIVE = {
