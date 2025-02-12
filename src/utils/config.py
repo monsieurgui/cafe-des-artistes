@@ -80,18 +80,6 @@ def load_config() -> dict:
     
     Returns:
         dict: Dictionary containing bot configuration
-            {
-                'bot_token': str,
-                'command_prefix': str,
-                'ffmpeg_path': str,
-                ...
-            }
-    
-    Notes:
-        - In development mode (BOT_ENV=development), uses .env file
-        - In production mode, uses config.yaml
-        - Environment variables take precedence over yaml config
-        - FFmpeg is automatically detected in bin/ directory
     """
     # Configure logging first
     logging.basicConfig(
@@ -110,46 +98,41 @@ def load_config() -> dict:
     is_dev = os.getenv('BOT_ENV', '').lower() == 'development'
     logger.info(f"Running in {'development' if is_dev else 'production'} mode")
     
+    # Default configuration that applies to both dev and prod
+    default_config = {
+        'command_prefix': os.getenv('BOT_PREFIX', '!'),
+        'ffmpeg_path': get_ffmpeg_path(),
+        'owner_id': int(os.getenv('OWNER_ID', 0)),
+        'log_level': os.getenv('LOG_LEVEL', 'INFO'),
+        'max_queue_size': int(os.getenv('MAX_QUEUE_SIZE', 1000)),
+        'timeout_duration': int(os.getenv('TIMEOUT_DURATION', 1800)),
+        'debug': os.getenv('DEBUG', 'false').lower() == 'true'
+    }
+    
     config = {}
     
     if is_dev:
         # Load configuration from environment variables
-        ffmpeg_path = get_ffmpeg_path()
-        logger.info(f"Using FFmpeg from: {ffmpeg_path}")
-        
-        config = {
-            'bot_token': os.getenv('DISCORD_TOKEN'),
-            'command_prefix': os.getenv('BOT_PREFIX', '!'),
-            'ffmpeg_path': ffmpeg_path,
-            'owner_id': int(os.getenv('OWNER_ID', 0)),
-            'log_level': os.getenv('LOG_LEVEL', 'INFO'),
-            'max_queue_size': int(os.getenv('MAX_QUEUE_SIZE', 1000)),
-            'timeout_duration': int(os.getenv('TIMEOUT_DURATION', 1800)),
-            'debug': os.getenv('DEBUG', 'false').lower() == 'true'
-        }
+        config = default_config.copy()
+        config['bot_token'] = os.getenv('DISCORD_TOKEN')
     else:
         # Load configuration from yaml in production
         try:
             config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'config.yaml')
             if os.path.exists(config_path):
                 with open(config_path, 'r') as f:
-                    config = yaml.safe_load(f)
-                    # Still use auto-detected FFmpeg path if not specified in yaml
-                    if 'ffmpeg_path' not in config:
-                        config['ffmpeg_path'] = get_ffmpeg_path()
+                    yaml_config = yaml.safe_load(f)
+                    # Merge yaml config with defaults
+                    config = {**default_config, **(yaml_config or {})}
+            else:
+                # If no yaml file exists, use environment variables with defaults
+                config = default_config.copy()
+                config['bot_token'] = os.getenv('DISCORD_TOKEN')
         except Exception as e:
             logger.error(f"Error loading config.yaml: {e}")
-            # Fallback to environment variables
-            config = {
-                'bot_token': os.getenv('DISCORD_TOKEN'),
-                'command_prefix': os.getenv('BOT_PREFIX', '!'),
-                'ffmpeg_path': get_ffmpeg_path(),
-                'owner_id': int(os.getenv('OWNER_ID', 0)),
-                'log_level': os.getenv('LOG_LEVEL', 'INFO'),
-                'max_queue_size': int(os.getenv('MAX_QUEUE_SIZE', 1000)),
-                'timeout_duration': int(os.getenv('TIMEOUT_DURATION', 1800)),
-                'debug': False
-            }
+            # Fallback to environment variables with defaults
+            config = default_config.copy()
+            config['bot_token'] = os.getenv('DISCORD_TOKEN')
     
     # Validate required configuration
     if not config.get('bot_token'):
