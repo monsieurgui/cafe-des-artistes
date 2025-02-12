@@ -8,7 +8,10 @@ import os
 import math
 import yt_dlp
 import requests
+import aiohttp
+import async_timeout
 from core.queue_view import QueueView
+from core.now_playing import NowPlayingDisplay
 from utils.constants import YTDL_OPTIONS, FFMPEG_OPTIONS, MESSAGES, COLORS
 
 class MusicPlayer:
@@ -30,6 +33,7 @@ class MusicPlayer:
         voice_client (VoiceClient): Client vocal Discord
         disconnect_task (Task): Tâche de déconnexion automatique
         thread_pool (ThreadPoolExecutor): Pool de threads pour le traitement parallèle
+        search_pool (ThreadPoolExecutor): Pool de threads dédié pour les recherches
         processing_queue (Queue): File d'attente pour le traitement asynchrone
         preload_queue (deque): File d'attente pour le préchargement
         loop (bool): État du mode boucle
@@ -41,6 +45,7 @@ class MusicPlayer:
         live_stream (dict): Informations de la diffusion en direct
         live_embed (Message): Embed de la diffusion en direct
         live_task (Task): Tâche pour la mise à jour de l'embed de la diffusion en direct
+        current_display (NowPlayingDisplay): Instance de la mise en cours de lecture
     """
     
     def __init__(self, bot, ctx):
@@ -55,7 +60,8 @@ class MusicPlayer:
         self.current = None
         self.voice_client = None
         self.disconnect_task = None  # Tâche pour le minuteur de déconnexion
-        self.thread_pool = ThreadPoolExecutor(max_workers=3)  # Limite les téléchargements simultanés
+        self.thread_pool = ThreadPoolExecutor(max_workers=2)  # For playback operations
+        self.search_pool = ThreadPoolExecutor(max_workers=1)  # Dedicated pool for search operations
         self.processing_queue = asyncio.Queue()  # File d'attente pour le traitement en arrière-plan
         self.processing_task = None
         self.preload_queue = deque(maxlen=3)  # Garde les 3 prochaines chansons préchargées
@@ -73,6 +79,13 @@ class MusicPlayer:
         self.live_stream = None
         self.live_embed = None
         self.live_task = None
+        self._cached_urls = {}
+        self._song_cache = {}
+        self._preload_task = None
+        self._processing_lock = asyncio.Lock()
+        self._playing_lock = False
+        self.session = aiohttp.ClientSession()
+        self.current_display = None
         
     async def ensure_voice_client(self):
         """
@@ -155,35 +168,73 @@ class MusicPlayer:
 
     async def add_to_queue(self, query):
         try:
-            # Fast initial metadata extraction
-            with yt_dlp.YoutubeDL({
-                'format': 'bestaudio',
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': False,
-                'skip_download': True,
-                'force_generic_extractor': True,
-                'socket_timeout': 2,
-                'retries': 1
-            }) as ydl:
-                # Direct extraction without playlist check for first song
-                info = await asyncio.get_event_loop().run_in_executor(
-                    None, 
-                    lambda: ydl.extract_info(query, download=False)
-                )
+            async with self._processing_lock:
+                # Check if query is a URL
+                is_url = query.startswith(('http://', 'https://', 'www.', 'youtube.com', 'youtu.be'))
                 
-                if not info:
-                    raise Exception(MESSAGES['VIDEO_UNAVAILABLE'])
-
-                # Add to queue with minimal processing
-                song = {
-                    'url': info.get('url', info.get('webpage_url', query)),
-                    'title': info.get('title', 'Unknown'),
-                    'duration': info.get('duration', 0),
-                    'needs_processing': False
+                # Prepare search query if not a URL
+                if not is_url:
+                    query = f"ytsearch:{query}"
+                
+                # Fast initial metadata extraction with optimized options
+                ytdl_opts = {
+                    'format': 'bestaudio',
+                    'quiet': True,
+                    'no_warnings': True,
+                    'extract_flat': True,  # Only fetch metadata
+                    'skip_download': True,
+                    'force_generic_extractor': False,
+                    'socket_timeout': 2,
+                    'retries': 1,
+                    'default_search': 'ytsearch',
+                    'noplaylist': True,
+                    'concurrent_fragment_downloads': 1,
+                    'buffersize': 32768,
+                    'extract_flat': True
                 }
+
+                # Check cache first
+                if query in self._cached_urls:
+                    song = self._cached_urls[query].copy()
+                else:
+                    # Use dedicated search pool
+                    try:
+                        async with async_timeout.timeout(10):
+                            info = await asyncio.get_event_loop().run_in_executor(
+                                self.search_pool, 
+                                lambda: yt_dlp.YoutubeDL(ytdl_opts).extract_info(query, download=False)
+                            )
+                            
+                            if not info:
+                                raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
+
+                            # Handle search results
+                            if not is_url and 'entries' in info:
+                                if not info['entries']:
+                                    raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
+                                info = info['entries'][0]
+
+                            song = {
+                                'url': info.get('url', info.get('webpage_url', query)),
+                                'title': info.get('title', 'Unknown'),
+                                'duration': info.get('duration', 0),
+                                'thumbnail': info.get('thumbnail'),
+                                'webpage_url': info.get('webpage_url'),
+                                'channel': info.get('channel', info.get('uploader')),
+                                'view_count': info.get('view_count'),
+                                'needs_processing': False
+                            }
+                            self._cached_urls[query] = song.copy()
+                    except Exception as e:
+                        print(f"Search error: {e}")
+                        raise
+
                 self.queue.append(song)
                 
+                # Start preloading next song if this is the first in queue
+                if len(self.queue) == 1 and not self.current:
+                    self._preload_task = asyncio.create_task(self._preload_next())
+
                 # Start playing immediately if nothing is playing
                 if not self.voice_client or not self.voice_client.is_playing():
                     await self.play_next()
@@ -193,8 +244,14 @@ class MusicPlayer:
                         color=COLORS['SUCCESS']
                     )
                     await self.ctx.send(embed=embed)
-                    await self.ctx.send(embed=await self.get_queue_display())
-                    
+
+        except asyncio.TimeoutError:
+            error_embed = discord.Embed(
+                title=MESSAGES['ERROR_TITLE'],
+                description=MESSAGES['TIMEOUT_ERROR'],
+                color=COLORS['ERROR']
+            )
+            await self.ctx.send(embed=error_embed)
         except Exception as e:
             error_embed = discord.Embed(
                 title=MESSAGES['ERROR_TITLE'],
@@ -203,130 +260,121 @@ class MusicPlayer:
             )
             await self.ctx.send(embed=error_embed)
 
-    def _extract_info(self, query):
-        """
-        Extrait les informations depuis YouTube (s'exécute dans le pool de threads)
-        """
-        is_url = query.startswith(('http://', 'https://', 'www.'))
-        ydl_opts = {
-            'quiet': True,
-            'no_warnings': True,
-            'extract_flat': 'in_playlist' if is_url else False,
-            'format': 'ba[ext=webm]',  # Prefer webm audio format
-            'default_search': 'ytsearch' if not is_url else None,
-            'concurrent_fragments': 10,  # Increased from 5
-            'postprocessor_args': {
-                'ffmpeg': ['-threads', '3']
-            },
-            'buffersize': 131072,  # Doubled buffer size
-            'socket_timeout': 2,
-            'extractor_retries': 1,  # Reduced retries
-            'nocheckcertificate': True,
-            'prefer_insecure': True,
-            'http_chunk_size': 20971520,  # 20MB chunks
-            'live_from_start': False,
-            'cachedir': False,  # Disable cache
-            'progress_hooks': [],  # Disable progress hooks
-            'no_color': True,
-        }
-        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
-            return ydl.extract_info(query, download=False)
-
-    async def process_video(self, video_url):
-        """
-        Traite la vidéo avec des paramètres optimisés
-        """
+    async def _preload_next(self):
+        """Preload the next song in the queue"""
         try:
-            loop = asyncio.get_running_loop()
-            video_data = await loop.run_in_executor(
-                None,
-                lambda: self.bot.ytdl.extract_info(video_url, download=False)
-            )
-            
-            # Pré-traite l'URL du flux pour réduire le temps de démarrage de la lecture
-            if 'url' in video_data:
-                await loop.run_in_executor(None, lambda: requests.head(video_data['url']))
-            
-            return {
-                'url': video_data['url'],
-                'title': video_data['title']
-            }
+            if not self.queue:
+                return
+
+            next_song = self.queue[0]
+            if next_song['url'] not in self._song_cache:
+                async with async_timeout.timeout(30):
+                    info = await asyncio.get_event_loop().run_in_executor(
+                        self.thread_pool,
+                        lambda: yt_dlp.YoutubeDL(YTDL_OPTIONS).extract_info(next_song['url'], download=False)
+                    )
+                    if info:
+                        self._song_cache[next_song['url']] = info
         except Exception as e:
-            raise e
+            print(f"Preload error: {e}")
 
     async def play_next(self):
-        """
-        Joue la prochaine chanson dans la file d'attente
-        """
-        # Prevent multiple simultaneous calls
-        if hasattr(self, '_playing_lock') and self._playing_lock:
+        if self._playing_lock:
             return
-        self._playing_lock = True
         
+        self._playing_lock = True
         try:
+            if self.voice_client is None or not self.voice_client.is_connected():
+                await self.ensure_voice_client()
+
+            if not self.queue and not self.loop:
+                self.current = None
+                # Start disconnect timer instead of immediate cleanup
+                if self.disconnect_task:
+                    self.disconnect_task.cancel()
+                self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
+                return
+
+            # Stop current display if exists
+            if self.current_display:
+                await self.current_display.stop()
+                self.current_display = None
+
             if self.loop and self.loop_song:
-                await self.play_loop_song()
-                return
+                next_song = self.loop_song
+            else:
+                if not self.queue:
+                    self.current = None
+                    return
+                next_song = self.queue.popleft()
 
-            if not self.queue:
-                if not self.voice_client:
-                    embed = discord.Embed(
-                        description=MESSAGES['GOODBYE'],
-                        color=COLORS['WARNING']
-                    )
-                    await self.ctx.send(embed=embed)
-                    await self.cleanup()
-                else:
-                    embed = discord.Embed(
-                        description=MESSAGES['QUEUE_EMPTY'],
-                        color=COLORS['WARNING']
-                    )
-                    await self.ctx.send(embed=embed)
-                    
-                    if self.disconnect_task:
-                        self.disconnect_task.cancel()
-                    
-                    self.disconnect_task = asyncio.create_task(self.delayed_disconnect())
-                return
-
-            song = self.queue.popleft()
-            self.current = song
-
-            try:
-                # Get fresh audio URL
+            # Use cached info if available
+            if next_song['url'] in self._song_cache:
+                info = self._song_cache[next_song['url']]
+            else:
                 info = await asyncio.get_event_loop().run_in_executor(
                     self.thread_pool,
-                    lambda: self.bot.ytdl.extract_info(song['url'], download=False)
+                    lambda: yt_dlp.YoutubeDL(YTDL_OPTIONS).extract_info(next_song['url'], download=False)
                 )
-                
-                if info.get('url'):
-                    audio = discord.FFmpegPCMAudio(
-                        info['url'],
-                        **FFMPEG_OPTIONS
-                    )
-                    
-                    def after_callback(error):
-                        if error:
-                            print(f"Error in playback: {error}")
-                        asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop)
-                    
-                    self.voice_client.play(audio, after=after_callback)
-                    await self.ctx.send(embed=await self.get_queue_display())
-                    
-            except Exception as e:
-                error_embed = discord.Embed(
-                    title=MESSAGES['ERROR_TITLE'],
-                    description=f"{song['title']}: {str(e)}",
+
+            if info is None:
+                await self.ctx.send(embed=discord.Embed(
+                    description=MESSAGES['SONG_UNAVAILABLE'],
                     color=COLORS['ERROR']
-                )
-                await self.ctx.send(embed=error_embed)
+                ))
                 await self.play_next()
+                return
+
+            # Store full info for display
+            self.current = {
+                'url': info.get('webpage_url', next_song['url']),  # Use webpage_url first
+                'title': info.get('title', 'Unknown'),
+                'duration': info.get('duration', 0),
+                'thumbnail': info.get('thumbnail', info.get('thumbnails', [{'url': None}])[0]['url']),
+                'webpage_url': info.get('webpage_url', info.get('url', next_song['url'])),
+                'channel': info.get('uploader', info.get('channel', 'Unknown')),
+                'view_count': info.get('view_count', 0)
+            }
+
+            # Get the stream URL (this is different from webpage_url)
+            stream_url = info.get('url', info.get('formats', [{}])[0].get('url'))
+            if not stream_url:
+                raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
+            
+            # Create FFmpeg audio source
+            audio = FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS)
+            
+            def after_playing(error):
+                if error:
+                    print(f"Error in playback: {error}")
+                asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop)
+
+            self.voice_client.play(audio, after=after_playing)
+
+            # Create and start the now playing display
+            self.current_display = NowPlayingDisplay(self.ctx, self.current)
+            await self.current_display.start()
+
+        except Exception as e:
+            print(f"Error in play_next: {e}")
+            error_embed = discord.Embed(
+                title=MESSAGES['ERROR_TITLE'],
+                description=str(e),
+                color=COLORS['ERROR']
+            )
+            await self.ctx.send(embed=error_embed)
+            
         finally:
             self._playing_lock = False
 
     async def skip(self):
-        """Passe à la chanson suivante"""
+        """Skip the current song"""
         if self.voice_client and self.voice_client.is_playing():
+            # Stop current display
+            if self.current_display:
+                await self.current_display.stop()
+                self.current_display = None
+                
             # Disable loop if active
             if self.loop:
                 self.loop = False
@@ -364,15 +412,8 @@ class MusicPlayer:
     async def get_queue_display(self):
         embed = discord.Embed(color=COLORS['INFO'])
         
-        def format_duration(seconds):
-            minutes, seconds = divmod(seconds, 60)
-            hours, minutes = divmod(minutes, 60)
-            if hours > 0:
-                return f"`{hours:02d}:{minutes:02d}:{seconds:02d}`"
-            return f"`{minutes:02d}:{seconds:02d}`"
-        
         if self.current:
-            duration = format_duration(self.current.get('duration', 0))
+            duration = self._format_duration(self.current.get('duration', 0))
             embed.add_field(
                 name=MESSAGES['NOW_PLAYING'],
                 value=f"{self.current['title']} {duration}",
@@ -383,7 +424,7 @@ class MusicPlayer:
         if self.queue and self.current:
             next_songs = list(self.queue)[:3]
             next_songs_text = "\n".join(
-                f"{i+1}. {song['title']} {format_duration(song.get('duration', 0))}"
+                f"{i+1}. {song['title']} {self._format_duration(song.get('duration', 0))}"
                 for i, song in enumerate(next_songs)
             )
             embed.add_field(
@@ -474,11 +515,16 @@ class MusicPlayer:
                     pass
                 self.voice_client = None
             
-            # Stop thread pool safely
+            # Stop thread pools safely
             if hasattr(self, 'thread_pool'):
                 if self.thread_pool and not getattr(self.thread_pool, '_shutdown', True):
                     self.thread_pool.shutdown(wait=False)
                 self.thread_pool = None
+                
+            if hasattr(self, 'search_pool'):
+                if self.search_pool and not getattr(self.search_pool, '_shutdown', True):
+                    self.search_pool.shutdown(wait=False)
+                self.search_pool = None
             
             # Clear all state variables
             self.current = None
@@ -495,8 +541,17 @@ class MusicPlayer:
             if hasattr(self, '_song_cache'):
                 self._song_cache.clear()
             
+            # Close aiohttp session
+            if not self.session.closed:
+                await self.session.close()
+            
             # Force garbage collection
             gc.collect()
+            
+            # Stop current display
+            if self.current_display:
+                await self.current_display.stop()
+                self.current_display = None
             
         except Exception as e:
             print(f"Error during cleanup: {e}")
@@ -523,19 +578,12 @@ class MusicPlayer:
 
     async def get_detailed_queue(self, show_all=False):
         """Obtient l'affichage détaillé de la file d'attente"""
-        def format_duration(seconds):
-            minutes, seconds = divmod(seconds, 60)
-            hours, minutes = divmod(minutes, 60)
-            if hours > 0:
-                return f"`{hours:02d}:{minutes:02d}:{seconds:02d}`"
-            return f"`{minutes:02d}:{seconds:02d}`"
-        
         if not show_all:
             # Comportement original pour !queue
             embed = discord.Embed(title="File d'attente détaillée", color=COLORS['INFO'])
             
             if self.current:
-                duration = format_duration(self.current.get('duration', 0))
+                duration = self._format_duration(self.current.get('duration', 0))
                 embed.add_field(
                     name=MESSAGES['NOW_PLAYING'],
                     value=f"{self.current['title']} {duration}",
@@ -545,7 +593,7 @@ class MusicPlayer:
             queue_list = list(self.queue)[:10]  # Affiche les 10 premières chansons
             if queue_list:
                 queue_text = "\n".join(
-                    f"`{i}.` {song['title']} {format_duration(song.get('duration', 0))}"
+                    f"`{i}.` {song['title']} {self._format_duration(song.get('duration', 0))}"
                     for i, song in enumerate(queue_list, 1)
                 )
                 embed.add_field(
@@ -581,7 +629,7 @@ class MusicPlayer:
                 
                 # Add current song to first page only
                 if page == 0 and self.current:
-                    duration = format_duration(self.current.get('duration', 0))
+                    duration = self._format_duration(self.current.get('duration', 0))
                     embed.add_field(
                         name=MESSAGES['NOW_PLAYING'],
                         value=f"{self.current['title']} {duration}",
@@ -590,7 +638,7 @@ class MusicPlayer:
                 
                 if current_page_songs:
                     queue_text = "\n".join(
-                        f"`{i}.` {song['title']} {format_duration(song.get('duration', 0))}"
+                        f"`{i}.` {song['title']} {self._format_duration(song.get('duration', 0))}"
                         for i, song in enumerate(current_page_songs, start_idx + 1)
                     )
                     embed.add_field(
@@ -612,29 +660,36 @@ class MusicPlayer:
                 
             return pages[0], QueueView(pages) if len(pages) > 1 else None
 
-    def _format_duration(self, seconds: int) -> str:
+    def _format_duration(self, seconds: float) -> str:
         """
         Formate une durée en secondes en format lisible HH:MM:SS.
         
         Args:
-            seconds (int): Nombre de secondes à formater
+            seconds (float): Nombre de secondes à formater
         
         Returns:
             str: Durée formatée en HH:MM:SS ou MM:SS si moins d'une heure
         
         Examples:
-            >>> _format_duration(3665)
+            >>> _format_duration(3665.5)
             '01:01:05'
-            >>> _format_duration(185)
+            >>> _format_duration(185.3)
             '03:05'
         """
-        hours = int(seconds // 3600)
-        minutes = int((seconds % 3600) // 60)
-        seconds = int(seconds % 60)
-        
-        if hours > 0:
-            return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
-        return f"{minutes:02d}:{seconds:02d}"
+        if seconds is None:
+            return "00:00"
+            
+        try:
+            seconds = int(float(seconds))
+            hours = seconds // 3600
+            minutes = (seconds % 3600) // 60
+            seconds = seconds % 60
+            
+            if hours > 0:
+                return f"{hours:02d}:{minutes:02d}:{seconds:02d}"
+            return f"{minutes:02d}:{seconds:02d}"
+        except (ValueError, TypeError):
+            return "00:00"
 
     async def toggle_loop(self, ctx, query=None):
         """Active/désactive le mode boucle pour la chanson actuelle ou démarre la boucle d'une nouvelle chanson"""
@@ -811,18 +866,35 @@ class MusicPlayer:
             )
 
     async def add_multiple_to_queue(self, query, repeat_count=1):
+        """Add multiple copies of a song or playlist to the queue"""
         try:
-            self.ensure_thread_pool()
             await self.ensure_voice_client()
-            await self.start_processing()
             
-            # Extract info only once
-            info = await asyncio.get_event_loop().run_in_executor(
-                self.thread_pool,
-                self._extract_info,
-                query
-            )
-            
+            # Use the same optimized options as regular play
+            ytdl_opts = {
+                'format': 'bestaudio',
+                'quiet': True,
+                'no_warnings': True,
+                'extract_flat': False,
+                'skip_download': True,
+                'force_generic_extractor': True,
+                'socket_timeout': 2,
+                'retries': 1
+            }
+
+            # Check cache first
+            if query in self._cached_urls:
+                info = self._cached_urls[query]
+            else:
+                # Extract info with fast options
+                async with async_timeout.timeout(10):
+                    info = await asyncio.get_event_loop().run_in_executor(
+                        self.thread_pool,
+                        lambda: yt_dlp.YoutubeDL(ytdl_opts).extract_info(query, download=False)
+                    )
+                    if info:
+                        self._cached_urls[query] = info
+
             total_songs_added = 0
             
             if 'entries' in info:  # Playlist
@@ -830,38 +902,51 @@ class MusicPlayer:
                 for _ in range(repeat_count):
                     for entry in entries:
                         song = {
-                            'url': f"https://www.youtube.com/watch?v={entry['id']}",
+                            'url': entry.get('url', f"https://www.youtube.com/watch?v={entry['id']}"),
                             'title': entry.get('title', 'Unknown Title'),
                             'duration': entry.get('duration', 0),
-                            'needs_processing': True
+                            'needs_processing': False
                         }
                         self.queue.append(song)
-                        await self.processing_queue.put(song)
                         total_songs_added += 1
+                        
+                        # Start preloading if this is the first song and nothing is playing
+                        if total_songs_added == 1 and not self.current:
+                            self._preload_task = asyncio.create_task(self._preload_next())
             else:  # Single video
                 song_template = {
-                    'url': info['webpage_url'],
-                    'title': info['title'],
+                    'url': info.get('url', info.get('webpage_url', query)),
+                    'title': info.get('title', 'Unknown Title'),
                     'duration': info.get('duration', 0),
-                    'needs_processing': True
+                    'needs_processing': False
                 }
+                
                 for _ in range(repeat_count):
                     song = song_template.copy()
                     self.queue.append(song)
-                    await self.processing_queue.put(song)
                     total_songs_added += 1
+                    
+                    # Start preloading if this is the first song and nothing is playing
+                    if total_songs_added == 1 and not self.current:
+                        self._preload_task = asyncio.create_task(self._preload_next())
             
             # Start playing if nothing is playing
             if not self.voice_client.is_playing():
                 await self.play_next()
             else:
-                # Send confirmation message with correct formatting
                 embed = discord.Embed(
                     description=MESSAGES['SONGS_ADDED'].format(total=total_songs_added),
                     color=COLORS['SUCCESS']
                 )
                 await self.ctx.send(embed=embed)
         
+        except asyncio.TimeoutError:
+            error_embed = discord.Embed(
+                title=MESSAGES['ERROR_TITLE'],
+                description=MESSAGES['TIMEOUT_ERROR'],
+                color=COLORS['ERROR']
+            )
+            await self.ctx.send(embed=error_embed)
         except Exception as e:
             error_embed = discord.Embed(
                 title=MESSAGES['ERROR_TITLE'],
@@ -999,3 +1084,53 @@ class MusicPlayer:
         # Stop current playback
         if self.voice_client and self.voice_client.is_playing():
             self.voice_client.stop()
+
+    def _extract_info(self, query):
+        """
+        Extract information from YouTube (runs in thread pool)
+        
+        Args:
+            query (str): URL or search query
+            
+        Returns:
+            dict: Video information from YouTube
+        """
+        # Check if query is a URL
+        is_url = query.startswith(('http://', 'https://', 'www.', 'youtube.com', 'youtu.be'))
+        
+        # Prepare search query if not a URL
+        if not is_url:
+            query = f"ytsearch:{query}"
+        
+        ydl_opts = {
+            'quiet': True,
+            'no_warnings': True,
+            'extract_flat': 'in_playlist' if is_url else False,
+            'format': 'bestaudio/best',
+            'default_search': 'ytsearch',  # Enable YouTube search
+            'concurrent_fragments': 5,
+            'postprocessor_args': {
+                'ffmpeg': ['-threads', '2']
+            },
+            'socket_timeout': 2,
+            'retries': 1,
+            'nocheckcertificate': True,
+            'prefer_insecure': True,
+            'http_chunk_size': 10485760,  # 10MB chunks
+            'cachedir': False,
+            'progress_hooks': [],
+            'no_color': True,
+        }
+        
+        with yt_dlp.YoutubeDL(ydl_opts) as ydl:
+            try:
+                info = ydl.extract_info(query, download=False)
+                # If it's a search result, get the first entry
+                if not is_url and 'entries' in info:
+                    if not info['entries']:
+                        raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
+                    return info['entries'][0]
+                return info
+            except Exception as e:
+                print(f"Error extracting info: {e}")
+                raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])

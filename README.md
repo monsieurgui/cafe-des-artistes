@@ -1,146 +1,80 @@
-# Café des Artistes - Bot Musical Discord
+# Café des Artistes Discord Bot
 
-Bot musical Discord développé spécifiquement pour le serveur Café des Artistes.
+A feature-rich Discord music bot with high-quality playback and performance optimizations.
 
-## Commandes
+## Setup
 
-### Lecture
-- `!p <lien/recherche>`: Joue une chanson ou ajoute à la queue
-- `!skip`: Passe à la chanson suivante
-- `!loop`: Active/désactive la lecture en boucle
-- `!quit`: Arrête la musique et déconnecte le bot
-
-### Diffusion en Direct
-- `!live <lien>`: Démarre une diffusion en direct
-- `!stop`: Arrête la diffusion en direct
-
-### File d'attente
-- `!queue`: Affiche les 10 prochaines chansons
-- `!queue all`: Affiche toute la file d'attente
-- `!purge`: Vide la file d'attente
-
-### Administration
-- `!cleanup`: Force le nettoyage des ressources (Admin uniquement)
-- `!support <message>`: Envoie un message au support
-
-## Configuration
-
-1. Copier `config.template.yaml` vers `config.yaml`
-2. Ajouter le token du bot dans `config.yaml`
-3. Configurer les autres paramètres selon les besoins
-
-## Déploiement
-
-### Prérequis
-
-- Python 3.11+
+### Prerequisites
+- Python 3.8 or higher
 - FFmpeg
-- Token du bot Discord
+- Discord Bot Token
 
-### Installation locale
+### Development Environment
 
-1. Cloner le dépôt
-2. Créer un environnement virtuel:
+1. Install FFmpeg:
+   - Windows: Download from [FFmpeg official website](https://ffmpeg.org/download.html)
+   - Linux: `sudo apt-get install ffmpeg`
+   - macOS: `brew install ffmpeg`
 
-```bash
-python -m venv venv
-source venv/bin/activate # Linux/Mac
-venv\Scripts\activate # Windows
-```
+2. Clone the repository:
+   ```bash
+   git clone https://github.com/yourusername/cafe-des-artistes.git
+   cd cafe-des-artistes
+   ```
 
-3. Installer les dépendances:
+3. Set up environment:
+   - Copy `src/.env.example` to `src/.env`
+   - Edit `src/.env` and add your Discord token and FFmpeg path
+   ```bash
+   cp src/.env.example src/.env
+   ```
 
-```bash
-pip install -r requirements.txt
-```
+4. Run in development mode:
+   - Windows: Double-click `run_dev.bat`
+   - Linux/macOS: Use Docker Compose
 
-4. Configurer le bot:
+### Production Environment (Docker)
 
-```bash
-cp src/config/config.template.yaml src/config/config.yaml
-```
+1. Configure environment:
+   ```bash
+   cp src/.env.example src/.env
+   # Edit src/.env with your production settings
+   ```
 
-5. Exécuter le bot:
-```bash
-python src/main.py
-```
+2. Run with Docker Compose:
+   ```bash
+   docker-compose up -d
+   ```
 
-### Déploiement avec Docker
+## Features
+- High-quality music playback
+- Queue management
+- Live streaming support
+- Performance optimizations
+- Playlist support
+- Loop mode
+- And more!
 
-1. Configurer le bot:
+## Commands
+- `!p` or `!play`: Play a song or add to queue
+- `!s` or `!skip`: Skip current song
+- `!q` or `!queue`: Show current queue
+- `!l` or `!loop`: Toggle loop mode
+- `!live`: Start a live stream
+- Check `!help` for more commands
 
-```bash
-cp src/config/config.template.yaml config.yaml
-```
+## Development vs Production
+- Development: Uses local Python environment with hot-reloading
+- Production: Uses Docker with optimized settings
 
-2. Construire et exécuter avec docker-compose:
+## Troubleshooting
+- Ensure FFmpeg is properly installed and path is set in .env
+- Check Discord token permissions
+- Verify Python version compatibility
+- For development issues, check the virtual environment
 
-```bash
-docker-compose up -d
-```
+## Contributing
+Feel free to submit issues and pull requests!
 
-## Maintenance
-
-### Logs
-Les logs sont stockés dans le répertoire `logs/` lors de l'exécution avec Docker. Surveillez-les pour les problèmes.
-
-### Gestion de la mémoire
-Le bot se nettoie automatiquement:
-- Après la lecture
-- Après 30 minutes d'inactivité
-- Avec des limites de mémoire lors de l'exécution dans Docker
-
-### Limites de ressources Docker
-Les limites de mémoire sont configurées dans docker-compose.yml:
-
-```yaml
-deploy:
-resources:
-limits:
-memory: 512M
-reservations:
-memory: 256M
-```
-
-## Résolution des problèmes
-
-1. **Le bot ne joue pas de musique**
-   - Vérifiez que FFmpeg est installé
-   - Vérifiez que le bot a les permissions appropriées
-   - Vérifiez la connexion au canal vocal
-
-2. **Utilisation excessive de la mémoire**
-   - Vérifiez les logs pour les fuites de mémoire
-   - Vérifiez que le nettoyage fonctionne
-   - Ajustez les limites de mémoire Docker
-
-3. **Problèmes de connexion**
-   - Vérifiez la connectivité réseau
-   - Vérifiez l'état de l'API Discord
-   - Examinez les logs d'erreurs
-
-## Contribution
-
-1. Forker le dépôt
-2. Créer une branche de fonctionnalité
-3. Valider les modifications
-4. Envoyer la branche
-5. Créer une Pull Request
-
-## Licence
-
-Apache License 2.0
-
-Copyright 2024 Guillaume Lévesque
-
-Licencié sous la Licence Apache, Version 2.0 (la "Licence");
-vous ne pouvez pas utiliser ce fichier excepté en conformité avec la Licence.
-Vous pouvez obtenir une copie de la Licence à
-
-    http://www.apache.org/licenses/LICENSE-2.0
-
-Unless required by applicable law or agreed to in writing, software
-distributed under the License is distributed on an "AS IS" BASIS,
-WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
-See the License for the specific language governing permissions and
-limitations under the License.
+## License
+[Your License Here]
