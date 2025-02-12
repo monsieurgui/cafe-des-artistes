@@ -155,33 +155,58 @@ class MusicPlayer:
 
     async def add_to_queue(self, query):
         try:
-            # Fast initial metadata extraction
-            with yt_dlp.YoutubeDL({
-                'format': 'bestaudio',
-                'quiet': True,
-                'no_warnings': True,
-                'extract_flat': False,
-                'skip_download': True,
-                'force_generic_extractor': True,
-                'socket_timeout': 2,
-                'retries': 1
-            }) as ydl:
-                # Direct extraction without playlist check for first song
-                info = await asyncio.get_event_loop().run_in_executor(
-                    None, 
-                    lambda: ydl.extract_info(query, download=False)
-                )
+            async with self._processing_lock:
+                # Check if query is a URL
+                is_url = query.startswith(('http://', 'https://', 'www.', 'youtube.com', 'youtu.be'))
                 
-                if not info:
-                    raise Exception(MESSAGES['VIDEO_UNAVAILABLE'])
+                # Prepare search query if not a URL
+                if not is_url:
+                    query = f"ytsearch:{query}"
+                
+                # Fast initial metadata extraction with optimized options
+                ytdl_opts = YTDL_OPTIONS.copy()
+                ytdl_opts.update({
+                    'extract_flat': True,  # Only fetch metadata
+                    'force_generic_extractor': False,
+                    'default_search': 'ytsearch'  # Enable YouTube search
+                })
 
-                # Add to queue with minimal processing
-                song = {
-                    'url': info.get('url', info.get('webpage_url', query)),
-                    'title': info.get('title', 'Unknown'),
-                    'duration': info.get('duration', 0),
-                    'needs_processing': False
-                }
+                # Check cache first
+                if query in self._cached_urls:
+                    song = self._cached_urls[query].copy()
+                else:
+                    # Use dedicated search pool
+                    try:
+                        async with async_timeout.timeout(10):
+                            info = await asyncio.get_event_loop().run_in_executor(
+                                self.search_pool, 
+                                lambda: yt_dlp.YoutubeDL(ytdl_opts).extract_info(query, download=False)
+                            )
+                            
+                            if not info:
+                                raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
+
+                            # Handle search results
+                            if not is_url and 'entries' in info:
+                                if not info['entries']:
+                                    raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
+                                info = info['entries'][0]
+
+                            song = {
+                                'url': info.get('webpage_url', info.get('url', query)),
+                                'title': info.get('title', 'Unknown'),
+                                'duration': info.get('duration', 0),
+                                'thumbnail': info.get('thumbnail'),
+                                'webpage_url': info.get('webpage_url'),
+                                'channel': info.get('channel', info.get('uploader')),
+                                'view_count': info.get('view_count'),
+                                'needs_processing': False
+                            }
+                            self._cached_urls[query] = song.copy()
+                    except Exception as e:
+                        print(f"Search error: {e}")
+                        raise
+
                 self.queue.append(song)
                 
                 # Start playing immediately if nothing is playing

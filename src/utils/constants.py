@@ -15,7 +15,17 @@ YTDL_OPTIONS = {
     'concurrent_fragment_downloads': 1,
     'buffersize': 32768,
     'postprocessors': [],
-    'cachedir': False
+    'cachedir': False,
+    'writethumbnail': False,
+    'writesubtitles': False,
+    'writeautomaticsub': False,
+    'get_duration': True,
+    'extract_metadata': True,
+    'default_search': 'ytsearch',
+    'source_address': '0.0.0.0',  # IPv6 addresses cause issues sometimes
+    'ignoreerrors': True,  # Don't stop on download errors
+    'no_color': True,  # Disable ANSI color codes
+    'extract_flat': 'in_playlist'  # Extract only video metadata for playlists
 }
 
 YTDL_OPTIONS_LIVE = {
