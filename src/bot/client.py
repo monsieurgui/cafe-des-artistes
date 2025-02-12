@@ -26,52 +26,63 @@ class MusicBot(commands.Bot):
 
     def __init__(self):
         """
-        Initialise le bot avec les configurations nécessaires.
+        Initialize the bot with necessary configurations.
         
-        Configure:
-        - Les intentions Discord requises
-        - Le préfixe de commande
-        - Le gestionnaire YouTube-DL
-        - Le stockage des lecteurs de musique
+        Configures:
+        - Required Discord intents
+        - Command prefix
+        - YouTube-DL manager
+        - Music player storage
         """
         self.config = load_config()
         
-        # Configuration des intentions Discord nécessaires
+        # Configure Discord intents
         intents = discord.Intents.default()
-        intents.message_content = True  # Permet la lecture du contenu des messages
-        intents.voice_states = True     # Permet le suivi des états vocaux
+        intents.message_content = True
+        intents.voice_states = True
         
+        # Initialize the bot with configuration
         super().__init__(
             command_prefix=self.config['command_prefix'],
             intents=intents,
-            help_command=None  # Désactive la commande d'aide par défaut
+            help_command=None
         )
         
-        # Initialisation du gestionnaire YouTube-DL avec les options optimisées
+        # Initialize YouTube-DL with optimized options
         self.ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
         
-        # Stockage des lecteurs de musique par serveur
+        # Storage for music players per server
         self.music_players = {}
+        
+        # Configure logging - use a safer way to get log level
+        try:
+            log_level = self.config.get('log_level', 'INFO').upper()
+            level = getattr(logging, log_level, logging.INFO)
+        except (AttributeError, KeyError):
+            level = logging.INFO
+            
+        logging.basicConfig(
+            level=level,
+            format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+        )
 
     async def setup_hook(self):
-        """
-        Configure les extensions du bot au démarrage.
-        
-        Cette méthode est appelée automatiquement par discord.py
-        lors de l'initialisation du bot.
-        
-        Raises:
-            ExtensionNotFound: Si le module music n'est pas trouvé
-            ExtensionFailed: Si le chargement échoue
-        """
+        """Configure bot extensions on startup"""
         await self.load_extension('cogs.music')
 
     async def on_ready(self):
-        """Appelé lorsque le bot est prêt et connecté"""
+        """Called when the bot is ready and connected"""
         logger = logging.getLogger(__name__)
-        logger.info(f"Bot connecté en tant que {self.user}")
-        logger.info(f"ID du bot: {self.user.id}")
-        logger.info("Bot prêt à recevoir des commandes!")
+        logger.info(f"Bot connected as {self.user}")
+        logger.info(f"Bot ID: {self.user.id}")
+        logger.info("Bot ready to receive commands!")
+        
+        # Set bot activity
+        activity = discord.Activity(
+            type=discord.ActivityType.listening,
+            name=f"{self.config['command_prefix']}help"
+        )
+        await self.change_presence(activity=activity)
 
     async def on_voice_state_update(self, member, before, after):
         """
@@ -93,41 +104,8 @@ class MusicBot(commands.Bot):
         """
         # ... code existant ...
 
-    async def on_error(self, event_method: str, *args, **kwargs):
-        """
-        Gestionnaire global des erreurs d'événements.
-        
-        Capture et journalise toutes les erreurs non gérées qui se produisent
-        pendant le traitement des événements Discord.
-        
-        Args:
-            event_method (str): Nom de la méthode d'événement qui a échoué
-            *args: Arguments positionnels de l'événement
-            **kwargs: Arguments nommés de l'événement
-            
-        Notes:
-            - Journalise la trace complète de l'erreur
-            - Permet la continuité du bot malgré les erreurs
-        """
-        print(f'Erreur dans {event_method}:', file=sys.stderr)
-        traceback.print_exc()
-
     async def on_command_error(self, ctx, error):
-        """
-        Gestionnaire global des erreurs de commandes.
-        
-        Traite les erreurs qui se produisent lors de l'exécution des commandes
-        et fournit des messages d'erreur appropriés aux utilisateurs.
-        
-        Args:
-            ctx (Context): Contexte de la commande
-            error (CommandError): L'erreur qui s'est produite
-            
-        Notes:
-            - Gère spécifiquement les erreurs ValueError
-            - Affiche des messages d'erreur conviviaux
-            - Les messages d'erreur s'effacent automatiquement après 10 secondes
-        """
+        """Global command error handler"""
         if isinstance(error, commands.CommandInvokeError):
             error = error.original
         
@@ -138,3 +116,15 @@ class MusicBot(commands.Bot):
                 color=COLORS['ERROR']
             )
             await ctx.send(embed=embed, delete_after=10)
+        elif self.config.get('debug', False):
+            # In debug mode, show full error traceback
+            traceback.print_exception(type(error), error, error.__traceback__)
+
+    async def on_error(self, event_method: str, *args, **kwargs):
+        """Global event error handler"""
+        print(f'Error in {event_method}:', file=sys.stderr)
+        traceback.print_exc()
+
+    def run(self):
+        """Run the bot with the configured token"""
+        super().run(self.config['bot_token'], log_handler=None)
