@@ -1,5 +1,7 @@
 import yaml
 import os
+import logging
+from dotenv import load_dotenv
 
 """
 Module de gestion de la configuration du bot.
@@ -8,25 +10,155 @@ Ce module gère le chargement de la configuration depuis un fichier YAML
 et fournit les paramètres nécessaires au fonctionnement du bot.
 """
 
+def setup_ffmpeg_environment():
+    """
+    Set up the FFmpeg environment by adding the bin directory to PATH
+    so FFmpeg can find its DLL dependencies.
+    """
+    logger = logging.getLogger(__name__)
+    
+    # Get the absolute path to the bin directory
+    bin_dir = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'bin'))
+    
+    if os.path.exists(bin_dir):
+        # Get current PATH
+        current_path = os.environ.get('PATH', '')
+        
+        # Add bin directory to PATH if not already there
+        if bin_dir not in current_path:
+            logger.debug(f"Adding FFmpeg bin directory to PATH: {bin_dir}")
+            os.environ['PATH'] = f"{bin_dir}{os.pathsep}{current_path}"
+            
+        return True
+    return False
+
+def get_ffmpeg_path():
+    """
+    Get the FFmpeg path, checking multiple locations in order.
+    """
+    logger = logging.getLogger(__name__)
+    
+    # Set up FFmpeg environment first
+    setup_ffmpeg_environment()
+    
+    # Check bin directory in project root first
+    bin_ffmpeg = os.path.abspath(os.path.join(os.path.dirname(__file__), '..', '..', 'bin', 'ffmpeg.exe'))
+    logger.debug(f"Checking for FFmpeg in bin directory: {bin_ffmpeg}")
+    if os.path.exists(bin_ffmpeg):
+        logger.info(f"Found FFmpeg in bin directory: {bin_ffmpeg}")
+        return bin_ffmpeg
+        
+    # Then check environment variable
+    env_ffmpeg = os.getenv('FFMPEG_PATH')
+    if env_ffmpeg:
+        logger.debug(f"Checking FFmpeg from environment variable: {env_ffmpeg}")
+        if os.path.exists(env_ffmpeg):
+            logger.info(f"Found FFmpeg from environment variable: {env_ffmpeg}")
+            return env_ffmpeg
+    
+    # Check common Windows installation paths
+    windows_paths = [
+        r"C:\ffmpeg\bin\ffmpeg.exe",
+        os.path.expanduser("~\\ffmpeg\\bin\\ffmpeg.exe"),
+        os.path.expandvars("%PROGRAMFILES%\\ffmpeg\\bin\\ffmpeg.exe"),
+        os.path.expandvars("%PROGRAMFILES(X86)%\\ffmpeg\\bin\\ffmpeg.exe")
+    ]
+    
+    for path in windows_paths:
+        logger.debug(f"Checking FFmpeg in Windows path: {path}")
+        if os.path.exists(path):
+            logger.info(f"Found FFmpeg in Windows path: {path}")
+            return path
+    
+    # Finally, try system-wide ffmpeg
+    logger.warning("No FFmpeg found in specific paths, falling back to system-wide 'ffmpeg'")
+    return 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
+
 def load_config() -> dict:
     """
-    Charge la configuration depuis le fichier config.yaml.
+    Loads configuration from either .env file (development) or config.yaml (production).
     
     Returns:
-        dict: Dictionnaire contenant la configuration du bot
+        dict: Dictionary containing bot configuration
             {
                 'bot_token': str,
                 'command_prefix': str,
-                'ffmpeg_path': str
+                'ffmpeg_path': str,
+                ...
             }
     
-    Raises:
-        FileNotFoundError: Si le fichier config.yaml n'existe pas
-        yaml.YAMLError: Si le fichier YAML est mal formaté
-        
     Notes:
-        Le chemin du fichier est relatif à l'emplacement du module
+        - In development mode (BOT_ENV=development), uses .env file
+        - In production mode, uses config.yaml
+        - Environment variables take precedence over yaml config
+        - FFmpeg is automatically detected in bin/ directory
     """
-    config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'config.yaml')
-    with open(config_path, 'r') as f:
-        return yaml.safe_load(f)
+    # Configure logging first
+    logging.basicConfig(
+        level=logging.DEBUG if os.getenv('DEBUG', '').lower() == 'true' else logging.INFO,
+        format='%(asctime)s - %(name)s - %(levelname)s - %(message)s'
+    )
+    logger = logging.getLogger(__name__)
+    
+    # Load .env file if it exists
+    env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
+    if os.path.exists(env_path):
+        logger.debug(f"Loading .env file from: {env_path}")
+        load_dotenv(env_path)
+    
+    # Determine if we're in development mode
+    is_dev = os.getenv('BOT_ENV', '').lower() == 'development'
+    logger.info(f"Running in {'development' if is_dev else 'production'} mode")
+    
+    config = {}
+    
+    if is_dev:
+        # Load configuration from environment variables
+        ffmpeg_path = get_ffmpeg_path()
+        logger.info(f"Using FFmpeg from: {ffmpeg_path}")
+        
+        config = {
+            'bot_token': os.getenv('DISCORD_TOKEN'),
+            'command_prefix': os.getenv('BOT_PREFIX', '!'),
+            'ffmpeg_path': ffmpeg_path,
+            'owner_id': int(os.getenv('OWNER_ID', 0)),
+            'log_level': os.getenv('LOG_LEVEL', 'INFO'),
+            'max_queue_size': int(os.getenv('MAX_QUEUE_SIZE', 1000)),
+            'timeout_duration': int(os.getenv('TIMEOUT_DURATION', 1800)),
+            'debug': os.getenv('DEBUG', 'false').lower() == 'true'
+        }
+    else:
+        # Load configuration from yaml in production
+        try:
+            config_path = os.path.join(os.path.dirname(__file__), '..', 'config', 'config.yaml')
+            if os.path.exists(config_path):
+                with open(config_path, 'r') as f:
+                    config = yaml.safe_load(f)
+                    # Still use auto-detected FFmpeg path if not specified in yaml
+                    if 'ffmpeg_path' not in config:
+                        config['ffmpeg_path'] = get_ffmpeg_path()
+        except Exception as e:
+            logger.error(f"Error loading config.yaml: {e}")
+            # Fallback to environment variables
+            config = {
+                'bot_token': os.getenv('DISCORD_TOKEN'),
+                'command_prefix': os.getenv('BOT_PREFIX', '!'),
+                'ffmpeg_path': get_ffmpeg_path(),
+                'owner_id': int(os.getenv('OWNER_ID', 0)),
+                'log_level': os.getenv('LOG_LEVEL', 'INFO'),
+                'max_queue_size': int(os.getenv('MAX_QUEUE_SIZE', 1000)),
+                'timeout_duration': int(os.getenv('TIMEOUT_DURATION', 1800)),
+                'debug': False
+            }
+    
+    # Validate required configuration
+    if not config.get('bot_token'):
+        raise ValueError("Bot token is required in configuration")
+    
+    # Validate FFmpeg path and ensure environment is set up
+    ffmpeg_path = config.get('ffmpeg_path')
+    if ffmpeg_path != 'ffmpeg' and ffmpeg_path != 'ffmpeg.exe' and not os.path.exists(ffmpeg_path):
+        logger.warning(f"FFmpeg not found at {ffmpeg_path}, falling back to system-wide 'ffmpeg'")
+        config['ffmpeg_path'] = 'ffmpeg.exe' if os.name == 'nt' else 'ffmpeg'
+    
+    return config

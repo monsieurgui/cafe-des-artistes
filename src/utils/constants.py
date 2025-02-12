@@ -55,13 +55,13 @@ COLORS = {
 # Messages du bot
 MESSAGES = {
     'PLAYLIST_ADDED': "✅ {} tounes ajoutées à la queue",
-    'SONGS_ADDED': "✅ {total} chansons ajoutées à la file d\'attente",
+    'SONGS_ADDED': "✅ {total} chansons ajoutées à la file d'attente",
     'SONG_ADDED': "✅ Toune ajoutée à la queue",
     'ERROR_TITLE': "❌ Erreur",
     'GOODBYE': "On s'revoit bein tôt mon t'cham! 👋",
     'QUEUE_EMPTY': "La queue est vide. 🎵",
     'WAIT_MESSAGE': "⏰ Dans 30 minutes pas de son, chow",
-    'QUEUE_EMPTY_SAD': "LLA queue est morte 😢",
+    'QUEUE_EMPTY_SAD': "La queue est dead 😢",
     'NOW_PLAYING': "🎵 En lecture",
     'NEXT_SONGS': "Prochaine chanson",
     'REMAINING_SONGS': "+{} autres chanzons en attente",
@@ -85,5 +85,6 @@ MESSAGES = {
     'LIVE_STOPPED': "⭕ Diffusion en direct arrêtée",
     'LIVE_ERROR': "❌ Erreur lors du chargement du direct",
     'LIVE_NOT_FOUND': "❌ Aucune diffusion en direct trouvée",
-    'PLAYBACK_STOPPED': '⏹️ Lecture arrêtée'
+    'PLAYBACK_STOPPED': '⏹️ Lecture arrêtée',
+    'VIDEO_UNAVAILABLE': "❌ Cette vidéo n'est pas disponible"
 }

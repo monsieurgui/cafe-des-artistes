@@ -33,3 +33,6 @@ ENV/
 # Project specific
 config/config.yaml
 *.log
+
+.env
+.env.*
