@@ -5,7 +5,6 @@ YTDL_OPTIONS = {
     'format': 'bestaudio',
     'quiet': True,
     'no_warnings': True,
-    'extract_flat': False,
     'skip_download': True,
     'force_generic_extractor': False,
     'socket_timeout': 2,

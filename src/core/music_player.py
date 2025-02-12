@@ -177,21 +177,12 @@ class MusicPlayer:
                     query = f"ytsearch:{query}"
                 
                 # Fast initial metadata extraction with optimized options
-                ytdl_opts = {
-                    'format': 'bestaudio',
-                    'quiet': True,
-                    'no_warnings': True,
+                ytdl_opts = YTDL_OPTIONS.copy()
+                ytdl_opts.update({
                     'extract_flat': True,  # Only fetch metadata
-                    'skip_download': True,
                     'force_generic_extractor': False,
-                    'socket_timeout': 2,
-                    'retries': 1,
-                    'default_search': 'ytsearch',
-                    'noplaylist': True,
-                    'concurrent_fragment_downloads': 1,
-                    'buffersize': 32768,
-                    'extract_flat': True
-                }
+                    'default_search': 'ytsearch'  # Enable YouTube search
+                })
 
                 # Check cache first
                 if query in self._cached_urls:
@@ -215,7 +206,7 @@ class MusicPlayer:
                                 info = info['entries'][0]
 
                             song = {
-                                'url': info.get('url', info.get('webpage_url', query)),
+                                'url': info.get('webpage_url', info.get('url', query)),
                                 'title': info.get('title', 'Unknown'),
                                 'duration': info.get('duration', 0),
                                 'thumbnail': info.get('thumbnail'),
