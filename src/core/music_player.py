@@ -360,9 +360,17 @@ class MusicPlayer:
             audio = FFmpegPCMAudio(stream_url, **FFMPEG_OPTIONS)
             
             def after_playing(error):
-                if error:
-                    print(f"Error in playback: {error}")
-                asyncio.run_coroutine_threadsafe(self.play_next(), self.bot.loop)
+                async def cleanup():
+                    # Cleanup current display first
+                    if self.current_display:
+                        await self.current_display.stop()
+                        self.current_display = None
+                    # Then proceed with next song
+                    if error:
+                        print(f"Error in playback: {error}")
+                    await self.play_next()
+
+                asyncio.run_coroutine_threadsafe(cleanup(), self.bot.loop)
 
             self.voice_client.play(audio, after=after_playing)
 

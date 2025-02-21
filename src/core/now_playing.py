@@ -92,11 +92,21 @@ class NowPlayingDisplay:
             
     async def stop(self):
         """Stop updating and remove the display"""
-        if self.update_task:
-            self.update_task.cancel()
-        if self.message:
-            try:
-                await self.message.delete()
-            except:
-                pass
-        self.message = None 
+        try:
+            if self.update_task:
+                self.update_task.cancel()
+                self.update_task = None
+            if self.message:
+                try:
+                    await self.message.delete()
+                except discord.errors.NotFound:
+                    pass  # Message already deleted
+                except Exception as e:
+                    print(f"Error deleting now playing message: {e}")
+                finally:
+                    self.message = None
+        except Exception as e:
+            print(f"Error stopping now playing display: {e}")
+            # Ensure cleanup even if error occurs
+            self.update_task = None
+            self.message = None 
