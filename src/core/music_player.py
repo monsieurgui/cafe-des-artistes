@@ -232,7 +232,10 @@ class MusicPlayer:
                     await self.play_next()
                 else:
                     embed = discord.Embed(
-                        description=MESSAGES['SONG_ADDED'].format(song['title']),
+                        description=MESSAGES['SONG_ADDED'].format(
+                            title=song['title'],
+                            queue_size=len(self.queue)
+                        ),
                         color=COLORS['SUCCESS']
                     )
                     await self.ctx.send(embed=embed)
