@@ -27,6 +27,22 @@ YTDL_OPTIONS = {
     'extract_flat': 'in_playlist'
 }
 
+# Configuration YT-DLP pour le téléchargement
+YTDL_DOWNLOAD_OPTIONS = {
+    'format': 'bestaudio/best',
+    'quiet': True,
+    'no_warnings': True,
+    'outtmpl': '%(id)s.%(ext)s',  # Format du nom de fichier
+    'postprocessors': [{
+        'key': 'FFmpegExtractAudio',
+        'preferredcodec': 'mp3',
+        'preferredquality': '192',
+    }],
+    'nocheckcertificate': True,
+    'ignoreerrors': True,
+    'no_color': True
+}
+
 YTDL_OPTIONS_LIVE = {
     'format': 'best',
     'extractaudio': True,
@@ -49,8 +65,14 @@ YTDL_OPTIONS_LIVE = {
 
 # Configuration FFMPEG
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5',
-    'options': '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le'
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -analyzeduration 0 -probesize 32000 -thread_queue_size 4096',
+    'options': '-vn -f s16le -acodec pcm_s16le -flags low_delay -threads 1'
+}
+
+# Audio options (separated to avoid duplicates)
+FFMPEG_AUDIO_OPTIONS = {
+    'ar': 48000,  # Sample rate
+    'ac': 2       # Audio channels
 }
 
 # Couleurs des Embeds Discord
@@ -95,5 +117,17 @@ MESSAGES = {
     'LIVE_ERROR': "❌ Erreur lors du chargement du direct",
     'LIVE_NOT_FOUND': "❌ Aucune diffusion en direct trouvée",
     'PLAYBACK_STOPPED': '⏹️ Lecture arrêtée',
-    'VIDEO_UNAVAILABLE': "❌ Cette vidéo n'est pas disponible"
+    'VIDEO_UNAVAILABLE': "❌ Cette vidéo n'est pas disponible",
+    'LELIM_LOADING': "⏳ Chargement de la playlist Lelim...",
+    'LELIM_ERROR': "❌ Erreur lors du chargement de la playlist Lelim",
+    'LELIM_DOWNLOADING': "⏳ Téléchargement des chansons Lelim en cours...",
+    'LELIM_DOWNLOAD_COMPLETE': "✅ Téléchargement des chansons Lelim terminé",
+    'LELIM_DOWNLOAD_ERROR': "❌ Erreur lors du téléchargement des chansons Lelim: {}",
+    'LELIM_MENU_EXPIRED': "⏰ Menu expiré. Utilisez à nouveau la commande `!lelim` pour afficher le menu."
 }
+
+# URL de la playlist Lelim
+LELIM_PLAYLIST_URL = "https://www.youtube.com/playlist?list=PLjJXgtuafBUV2FsqKE5RWdF1NTXIdSoBw"
+
+# Chemin du dossier de cache pour les chansons Lelim
+LELIM_CACHE_DIR = "cache/lelim"
