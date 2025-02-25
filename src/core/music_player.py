@@ -12,7 +12,7 @@ import aiohttp
 import async_timeout
 from core.queue_view import QueueView
 from core.now_playing import NowPlayingDisplay
-from utils.constants import YTDL_OPTIONS, FFMPEG_OPTIONS, FFMPEG_AUDIO_OPTIONS, MESSAGES, COLORS
+from utils.constants import YTDL_OPTIONS, FFMPEG_OPTIONS, MESSAGES, COLORS
 
 class MusicPlayer:
     """
@@ -363,7 +363,6 @@ class MusicPlayer:
             audio = FFmpegPCMAudio(
                 stream_url, 
                 **FFMPEG_OPTIONS,
-                **FFMPEG_AUDIO_OPTIONS,
                 executable=self.bot.config.get('ffmpeg_path', 'ffmpeg')
             )
             
@@ -862,7 +861,6 @@ class MusicPlayer:
                 audio = FFmpegPCMAudio(
                     info['url'],
                     **FFMPEG_OPTIONS,
-                    **FFMPEG_AUDIO_OPTIONS,
                     executable=self.bot.config.get('ffmpeg_path', 'ffmpeg')
                 )
                 self.voice_client.play(
@@ -1045,7 +1043,6 @@ class MusicPlayer:
             audio = FFmpegPCMAudio(
                 self.live_stream['url'],
                 **FFMPEG_OPTIONS,
-                **FFMPEG_AUDIO_OPTIONS,
                 executable=self.bot.config.get('ffmpeg_path', 'ffmpeg')
             )
             self.voice_client.play(audio)

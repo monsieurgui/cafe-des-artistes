@@ -66,13 +66,7 @@ YTDL_OPTIONS_LIVE = {
 # Configuration FFMPEG
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -analyzeduration 0 -probesize 32000 -thread_queue_size 4096',
-    'options': '-vn -f s16le -acodec pcm_s16le -flags low_delay -threads 1'
-}
-
-# Audio options (separated to avoid duplicates)
-FFMPEG_AUDIO_OPTIONS = {
-    'ar': 48000,  # Sample rate
-    'ac': 2       # Audio channels
+    'options': '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le -flags low_delay -threads 1'
 }
 
 # Couleurs des Embeds Discord
