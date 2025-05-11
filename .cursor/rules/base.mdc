@@ -1,0 +1,9 @@
+---
+description: 
+globs: 
+alwaysApply: true
+---
+This is a Discord Python bot using yt-dlp. 
+
+
+Before any tasks, make sure you get the latest docs for YT-DLP. Make sure the latest version is in the project, if not, update it. You will keep track of task and completions in memory.md. You will focus on one task a the time.

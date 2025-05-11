@@ -2,7 +2,7 @@ import subprocess
 
 # Configuration YT-DLP
 YTDL_OPTIONS = {
-    'format': 'bestaudio',
+    'format': 'bestaudio/best',
     'quiet': True,
     'no_warnings': True,
     'skip_download': True,
@@ -44,9 +44,7 @@ YTDL_DOWNLOAD_OPTIONS = {
 }
 
 YTDL_OPTIONS_LIVE = {
-    'format': 'best',
-    'extractaudio': True,
-    'audioformat': 'mp3',
+    'format': 'bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best',
     'noplaylist': True,
     'nocheckcertificate': True,
     'ignoreerrors': False,

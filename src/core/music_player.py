@@ -902,7 +902,7 @@ class MusicPlayer:
             
             # Use the same optimized options as regular play
             ytdl_opts = {
-                'format': 'bestaudio',
+                'format': 'bestaudio/best',
                 'quiet': True,
                 'no_warnings': True,
                 'extract_flat': False,
