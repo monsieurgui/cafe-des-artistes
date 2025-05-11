@@ -32,6 +32,7 @@ ENV/
 
 # Project specific
 config/config.yaml
+src/config/config.yaml
 *.log
 
 .env
