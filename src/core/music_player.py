@@ -340,8 +340,9 @@ class MusicPlayer:
                     description=MESSAGES['SONG_UNAVAILABLE'],
                     color=COLORS['ERROR']
                 ))
-                await self.play_next()
-                return
+                self.current = None # Clear current song
+                self.bot.loop.create_task(self.play_next()) # Schedule next attempt
+                return # Exit this invocation
 
             # Store full info for display
             self.current = {
@@ -387,12 +388,23 @@ class MusicPlayer:
 
         except Exception as e:
             print(f"Error in play_next: {e}")
+            failed_song_title = "the current song"
+            if self.current and self.current.get('title') != 'Unknown':
+                failed_song_title = f"'{self.current['title']}'"
+            
+            error_message = f"Error playing {failed_song_title}: {str(e)}. Attempting next song if available."
+            if isinstance(e, ValueError) and str(e) == MESSAGES['VIDEO_UNAVAILABLE']:
+                 error_message = f"{MESSAGES['VIDEO_UNAVAILABLE']} for {failed_song_title}. Attempting next song if available."
+
             error_embed = discord.Embed(
                 title=MESSAGES['ERROR_TITLE'],
-                description=str(e),
+                description=error_message,
                 color=COLORS['ERROR']
             )
             await self.ctx.send(embed=error_embed)
+            self.current = None # Clear current song
+            self.bot.loop.create_task(self.play_next()) # Schedule next attempt
+            return # Exit this invocation
             
         finally:
             self._playing_lock = False
