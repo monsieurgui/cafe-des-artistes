@@ -119,6 +119,11 @@ class MusicPlayer:
                 await self.ctx.voice_client.disconnect(force=True)
             except:
                 pass
+        
+        # Additional delay for Discord's voice gateway to reset
+        if attempt > 0:
+            print("Waiting for Discord voice gateway to reset...")
+            await asyncio.sleep(5)  # 5 second additional delay
 
     async def _handle_voice_connection_error(self, error):
         """
@@ -258,7 +263,30 @@ class MusicPlayer:
                                         pass
                                     self.voice_client = None
                         
-                        # Strategy 3: Try using guild voice client if available
+                        # Strategy 3: Try with longer timeout and different parameters
+                        if not connection_success:
+                            try:
+                                print(f"Attempting extended timeout connection (attempt {attempt + 1})")
+                                # Wait longer before this attempt
+                                await asyncio.sleep(2)
+                                
+                                self.voice_client = await self.ctx.author.voice.channel.connect(
+                                    timeout=25.0,  # Longer timeout
+                                    reconnect=False,
+                                    self_deaf=False,  # Try not deafened
+                                    self_mute=False
+                                )
+                                connection_success = True
+                            except Exception as e:
+                                print(f"Extended timeout connection failed: {e}")
+                                if self.voice_client:
+                                    try:
+                                        await self.voice_client.disconnect(force=True)
+                                    except:
+                                        pass
+                                    self.voice_client = None
+                        
+                        # Strategy 4: Try using guild voice client if available
                         if not connection_success and guild.voice_client:
                             try:
                                 print(f"Attempting to use existing guild voice client (attempt {attempt + 1})")

@@ -97,6 +97,18 @@
   - Added random jitter to prevent connection thundering herd
   - Enhanced error handling with proper connection cleanup between attempts
 
+- [x] **Discord-Side Issue Investigation** (Started June 18, 2025):
+  - **Issue**: 4006 errors started occurring today after 8 months of working fine
+  - **Pattern**: Voice handshake completes but immediately terminates with 4006
+  - **Endpoint**: `c-iad03-67da893d.discord.media` (US East region)
+  - **Hypothesis**: Discord may have updated their voice gateway infrastructure
+  - **Temporary Workarounds**:
+    - Added extended timeout connection strategy (25s timeout)
+    - Added non-deafened connection attempt
+    - Added 5-second gateway reset delay after 4006 errors
+    - Implemented 4 different connection strategies with fallbacks
+  - **Next Steps**: Monitor Discord status and community reports for similar issues
+
 ### Testing Status:
 - [ ] User to test the fixes and provide feedback
 - [ ] Monitor for any remaining connection issues
