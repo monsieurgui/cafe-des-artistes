@@ -86,6 +86,7 @@ class MusicPlayer:
         self._playing_lock = False
         self._connection_lock = asyncio.Lock()  # Add connection lock
         self._connecting = False  # Track connection state
+        self._keepalive_task = None  # Voice keepalive task
         self.session = aiohttp.ClientSession()
         self.current_display = None
         
@@ -201,6 +202,9 @@ class MusicPlayer:
                             # Additional verification - check if we can access the voice state
                             if not self.voice_client.channel:
                                 raise Exception("Voice client channel is None")
+                            
+                            # Start voice keepalive to prevent Discord disconnections
+                            await self._start_voice_keepalive()
                             
                             # Success - return
                             return
@@ -640,6 +644,9 @@ class MusicPlayer:
                     color=COLORS['WARNING']
                 )
                 await self.ctx.send(embed=embed)
+                
+                # Stop keepalive before cleanup
+                await self._stop_voice_keepalive()
                 await self.cleanup()
                 
         except asyncio.CancelledError:
@@ -676,6 +683,9 @@ class MusicPlayer:
             if self._preload_task:
                 self._preload_task.cancel()
                 self._preload_task = None
+
+            # Stop voice keepalive task
+            await self._stop_voice_keepalive()
 
             # Stop current display
             if self.current_display:
@@ -1308,3 +1318,45 @@ class MusicPlayer:
             except Exception as e:
                 print(f"Error extracting info: {e}")
                 raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
+
+    async def _voice_keepalive(self):
+        """
+        Keeps the voice connection alive by periodically sending silence packets
+        This prevents Discord from disconnecting the bot due to inactivity
+        """
+        try:
+            print("Starting voice keepalive task")
+            while True:
+                if self.voice_client and self.voice_client.is_connected():
+                    try:
+                        # Send a silence packet every 30 seconds to keep connection alive
+                        # This prevents Discord's 15-minute to 2-hour disconnection cycle
+                        self.voice_client.send_audio_packet(b'\xF8\xFF\xFE', encode=False)
+                        await asyncio.sleep(30)
+                    except Exception as e:
+                        print(f"Error in voice keepalive: {e}")
+                        break
+                else:
+                    # Voice client disconnected, stop keepalive
+                    break
+        except asyncio.CancelledError:
+            print("Voice keepalive task cancelled")
+        except Exception as e:
+            print(f"Voice keepalive task error: {e}")
+
+    async def _start_voice_keepalive(self):
+        """
+        Start the voice keepalive task
+        """
+        if self._keepalive_task:
+            self._keepalive_task.cancel()
+        
+        self._keepalive_task = asyncio.create_task(self._voice_keepalive())
+
+    async def _stop_voice_keepalive(self):
+        """
+        Stop the voice keepalive task
+        """
+        if self._keepalive_task:
+            self._keepalive_task.cancel()
+            self._keepalive_task = None

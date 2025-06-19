@@ -73,6 +73,14 @@
   - Added `on_disconnect()` and `on_resumed()` handlers for gateway events
   - Added `on_voice_client_error()` handler for voice-specific errors
 
+- [x] **Voice Keepalive Solution** (Based on Discord.py discussion):
+  - Implemented `_voice_keepalive()` method to send silence packets every 30 seconds
+  - Added `_start_voice_keepalive()` and `_stop_voice_keepalive()` methods
+  - Prevents Discord's 15-minute to 2-hour disconnection cycle for load balancing
+  - Automatically starts when voice connection is established
+  - Properly stops when bot disconnects or cleans up
+  - Based on solution from [Discord.py discussion #9722](https://github.com/Rapptz/discord.py/discussions/9722#discussioncomment-8400265)
+
 ### Testing Status:
 - [ ] User to test the fixes and provide feedback
 - [ ] Monitor for any remaining connection issues
