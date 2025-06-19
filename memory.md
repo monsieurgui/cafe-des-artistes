@@ -63,6 +63,16 @@
   - Better task cancellation and resource cleanup
   - Graceful error handling during cleanup
 
+- [x] **Additional fixes for persistent 4006 errors**:
+  - Added connection state tracking to prevent race conditions
+  - Implemented connection lock to prevent multiple simultaneous connection attempts
+  - Added specific handling for 4006 session invalidation errors
+  - Enhanced error handling with `_handle_voice_connection_error()` method
+  - Added guild voice client checking to reuse existing connections
+  - Reduced connection timeout to 20s and increased stability wait to 2s
+  - Added `on_disconnect()` and `on_resumed()` handlers for gateway events
+  - Added `on_voice_client_error()` handler for voice-specific errors
+
 ### Testing Status:
 - [ ] User to test the fixes and provide feedback
 - [ ] Monitor for any remaining connection issues

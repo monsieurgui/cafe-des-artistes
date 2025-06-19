@@ -84,92 +84,167 @@ class MusicPlayer:
         self._preload_task = None
         self._processing_lock = asyncio.Lock()
         self._playing_lock = False
+        self._connection_lock = asyncio.Lock()  # Add connection lock
+        self._connecting = False  # Track connection state
         self.session = aiohttp.ClientSession()
         self.current_display = None
         
+    async def _handle_voice_connection_error(self, error):
+        """
+        Handle voice connection errors gracefully
+        """
+        error_str = str(error).lower()
+        
+        if "4006" in error_str or "session invalid" in error_str:
+            # Session invalidation - clear voice client and retry
+            print("Voice session invalidated, clearing client state")
+            if self.voice_client:
+                try:
+                    await self.voice_client.disconnect(force=True)
+                except:
+                    pass
+                self.voice_client = None
+            return True  # Indicate retry should be attempted
+            
+        elif "already connected" in error_str:
+            # Already connected error - try to use existing connection
+            print("Already connected to voice channel, attempting to use existing connection")
+            if self.ctx.voice_client and self.ctx.voice_client.is_connected():
+                self.voice_client = self.ctx.voice_client
+                return False  # No retry needed
+            else:
+                return True  # Retry needed
+                
+        elif "connection closed" in error_str:
+            # Connection closed - wait and retry
+            print("Voice connection closed unexpectedly")
+            await asyncio.sleep(2)
+            return True  # Retry should be attempted
+            
+        else:
+            # Other errors - log and don't retry
+            print(f"Voice connection error: {error}")
+            return False  # No retry
+
     async def ensure_voice_client(self):
         """
         Vérifie et établit une connexion vocale si nécessaire
         """
-        max_retries = 3
-        retry_delay = 1.0
-        
-        for attempt in range(max_retries):
+        # Use connection lock to prevent multiple simultaneous connection attempts
+        async with self._connection_lock:
+            if self._connecting:
+                # Wait for existing connection attempt to complete
+                while self._connecting:
+                    await asyncio.sleep(0.1)
+                return
+            
+            self._connecting = True
+            
             try:
-                # First, check if we already have a valid voice client
-                if self.voice_client and self.voice_client.is_connected():
-                    return
+                max_retries = 3
+                retry_delay = 1.0
                 
-                # Check if there's a valid voice client in the context
-                if self.ctx.voice_client and self.ctx.voice_client.is_connected():
-                    self.voice_client = self.ctx.voice_client
-                    return
-                
-                # If we have an invalid voice client, disconnect it first
-                if self.voice_client:
+                for attempt in range(max_retries):
                     try:
-                        await self.voice_client.disconnect(force=True)
-                    except:
-                        pass
-                    self.voice_client = None
-                
-                # Also disconnect any invalid voice client in context
-                if self.ctx.voice_client and not self.ctx.voice_client.is_connected():
-                    try:
-                        await self.ctx.voice_client.disconnect(force=True)
-                    except:
-                        pass
-                
-                # Check if user is in a voice channel
-                if not self.ctx.author.voice:
-                    raise ValueError(MESSAGES['VOICE_CHANNEL_REQUIRED'])
-                
-                # Connect to the voice channel with proper error handling
-                try:
-                    self.voice_client = await self.ctx.author.voice.channel.connect(
-                        timeout=30.0,  # Reduced timeout
-                        reconnect=False,  # Disable auto-reconnect to prevent loops
-                        self_deaf=True
-                    )
-                    
-                    # Wait a moment to ensure connection is stable
-                    await asyncio.sleep(1)
-                    
-                    # Verify connection is still valid
-                    if not self.voice_client.is_connected():
-                        raise Exception("Voice connection failed to establish")
-                    
-                    # Success - return
-                    return
-                        
-                except discord.ClientException as e:
-                    if "Already connected to a voice channel" in str(e):
-                        # Get the existing connection
-                        self.voice_client = self.ctx.voice_client
+                        # First, check if we already have a valid voice client
                         if self.voice_client and self.voice_client.is_connected():
                             return
-                        else:
-                            raise Exception("Voice client state is inconsistent")
-                    else:
-                        raise
-                except Exception as e:
-                    print(f"Voice connection error (attempt {attempt + 1}): {str(e)}")
-                    if attempt < max_retries - 1:
-                        await asyncio.sleep(retry_delay)
-                        retry_delay *= 2  # Exponential backoff
-                        continue
-                    else:
-                        raise
+                        
+                        # Check if there's a valid voice client in the context
+                        if self.ctx.voice_client and self.ctx.voice_client.is_connected():
+                            self.voice_client = self.ctx.voice_client
+                            return
+                        
+                        # If we have an invalid voice client, disconnect it first
+                        if self.voice_client:
+                            try:
+                                await self.voice_client.disconnect(force=True)
+                            except:
+                                pass
+                            self.voice_client = None
+                        
+                        # Also disconnect any invalid voice client in context
+                        if self.ctx.voice_client and not self.ctx.voice_client.is_connected():
+                            try:
+                                await self.ctx.voice_client.disconnect(force=True)
+                            except:
+                                pass
+                        
+                        # Check if user is in a voice channel
+                        if not self.ctx.author.voice:
+                            raise ValueError(MESSAGES['VOICE_CHANNEL_REQUIRED'])
+                        
+                        # Check if there are any existing voice clients in the guild
+                        guild = self.ctx.guild
+                        if guild.voice_client and guild.voice_client.is_connected():
+                            # Use the existing guild voice client
+                            self.voice_client = guild.voice_client
+                            return
+                        
+                        # Connect to the voice channel with proper error handling
+                        try:
+                            # Use a more conservative connection approach
+                            self.voice_client = await self.ctx.author.voice.channel.connect(
+                                timeout=20.0,  # Further reduced timeout
+                                reconnect=False,  # Disable auto-reconnect to prevent loops
+                                self_deaf=True,
+                                self_mute=False
+                            )
+                            
+                            # Wait a moment to ensure connection is stable
+                            await asyncio.sleep(2)
+                            
+                            # Verify connection is still valid
+                            if not self.voice_client.is_connected():
+                                raise Exception("Voice connection failed to establish")
+                            
+                            # Additional verification - check if we can access the voice state
+                            if not self.voice_client.channel:
+                                raise Exception("Voice client channel is None")
+                            
+                            # Success - return
+                            return
+                                
+                        except discord.ClientException as e:
+                            if "Already connected to a voice channel" in str(e):
+                                # Get the existing connection
+                                self.voice_client = self.ctx.voice_client
+                                if self.voice_client and self.voice_client.is_connected():
+                                    return
+                                else:
+                                    raise Exception("Voice client state is inconsistent")
+                            elif "Connection closed" in str(e) or "4006" in str(e):
+                                # Handle session invalidation errors
+                                print(f"Session invalidation error (attempt {attempt + 1}): {str(e)}")
+                                if attempt < max_retries - 1:
+                                    # Wait longer for session invalidation errors
+                                    await asyncio.sleep(retry_delay * 2)
+                                    retry_delay *= 2
+                                    continue
+                                else:
+                                    raise Exception(f"Voice session invalid after {max_retries} attempts: {str(e)}")
+                            else:
+                                raise
+                        except Exception as e:
+                            print(f"Voice connection error (attempt {attempt + 1}): {str(e)}")
+                            if attempt < max_retries - 1:
+                                await asyncio.sleep(retry_delay)
+                                retry_delay *= 2  # Exponential backoff
+                                continue
+                            else:
+                                raise
 
-            except Exception as e:
-                if attempt < max_retries - 1:
-                    print(f"Voice client initialization error (attempt {attempt + 1}): {str(e)}")
-                    await asyncio.sleep(retry_delay)
-                    retry_delay *= 2  # Exponential backoff
-                    continue
-                else:
-                    print(f"Voice client initialization error: {str(e)}")
-                    raise
+                    except Exception as e:
+                        if attempt < max_retries - 1:
+                            print(f"Voice client initialization error (attempt {attempt + 1}): {str(e)}")
+                            await asyncio.sleep(retry_delay)
+                            retry_delay *= 2  # Exponential backoff
+                            continue
+                        else:
+                            print(f"Voice client initialization error: {str(e)}")
+                            raise
+            finally:
+                self._connecting = False
 
     async def start_processing(self):
         """Démarre le traitement en arrière-plan s'il n'est pas déjà en cours"""
