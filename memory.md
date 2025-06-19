@@ -81,6 +81,12 @@
   - Properly stops when bot disconnects or cleans up
   - Based on solution from [Discord.py discussion #9722](https://github.com/Rapptz/discord.py/discussions/9722#discussioncomment-8400265)
 
+- [x] **Dependency Updates** (Attempting to fix 4006 handshake errors):
+  - Updated `discord.py` from `>=2.3.2` to `>=2.4.1` (latest stable version)
+  - Added `websockets>=12.0` for better WebSocket connection stability
+  - This addresses potential compatibility issues with Discord's voice gateway
+  - The 4006 error during voice handshake suggests a version compatibility issue
+
 ### Testing Status:
 - [ ] User to test the fixes and provide feedback
 - [ ] Monitor for any remaining connection issues
