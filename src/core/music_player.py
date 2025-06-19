@@ -91,33 +91,85 @@ class MusicPlayer:
         """
         Vérifie et établit une connexion vocale si nécessaire
         """
-        try:
-            # Check if current voice client is valid
-            if self.voice_client and self.voice_client.is_connected():
-                return
+        max_retries = 3
+        retry_delay = 1.0
+        
+        for attempt in range(max_retries):
+            try:
+                # First, check if we already have a valid voice client
+                if self.voice_client and self.voice_client.is_connected():
+                    return
                 
-            # Clear any existing invalid voice client
-            self.voice_client = None
-            
-            # Try to get voice client from context
-            if self.ctx.voice_client and self.ctx.voice_client.is_connected():
-                self.voice_client = self.ctx.voice_client
-                return
+                # Check if there's a valid voice client in the context
+                if self.ctx.voice_client and self.ctx.voice_client.is_connected():
+                    self.voice_client = self.ctx.voice_client
+                    return
                 
-            # Try to connect to author's voice channel
-            if self.ctx.author.voice:
-                self.voice_client = await self.ctx.author.voice.channel.connect(
-                    timeout=60.0,
-                    reconnect=True,
-                    self_deaf=True
-                )
-                return
+                # If we have an invalid voice client, disconnect it first
+                if self.voice_client:
+                    try:
+                        await self.voice_client.disconnect(force=True)
+                    except:
+                        pass
+                    self.voice_client = None
                 
-            raise ValueError(MESSAGES['VOICE_CHANNEL_REQUIRED'])
+                # Also disconnect any invalid voice client in context
+                if self.ctx.voice_client and not self.ctx.voice_client.is_connected():
+                    try:
+                        await self.ctx.voice_client.disconnect(force=True)
+                    except:
+                        pass
+                
+                # Check if user is in a voice channel
+                if not self.ctx.author.voice:
+                    raise ValueError(MESSAGES['VOICE_CHANNEL_REQUIRED'])
+                
+                # Connect to the voice channel with proper error handling
+                try:
+                    self.voice_client = await self.ctx.author.voice.channel.connect(
+                        timeout=30.0,  # Reduced timeout
+                        reconnect=False,  # Disable auto-reconnect to prevent loops
+                        self_deaf=True
+                    )
+                    
+                    # Wait a moment to ensure connection is stable
+                    await asyncio.sleep(1)
+                    
+                    # Verify connection is still valid
+                    if not self.voice_client.is_connected():
+                        raise Exception("Voice connection failed to establish")
+                    
+                    # Success - return
+                    return
+                        
+                except discord.ClientException as e:
+                    if "Already connected to a voice channel" in str(e):
+                        # Get the existing connection
+                        self.voice_client = self.ctx.voice_client
+                        if self.voice_client and self.voice_client.is_connected():
+                            return
+                        else:
+                            raise Exception("Voice client state is inconsistent")
+                    else:
+                        raise
+                except Exception as e:
+                    print(f"Voice connection error (attempt {attempt + 1}): {str(e)}")
+                    if attempt < max_retries - 1:
+                        await asyncio.sleep(retry_delay)
+                        retry_delay *= 2  # Exponential backoff
+                        continue
+                    else:
+                        raise
 
-        except Exception as e:
-            print(f"Voice client initialization error: {str(e)}")
-            raise
+            except Exception as e:
+                if attempt < max_retries - 1:
+                    print(f"Voice client initialization error (attempt {attempt + 1}): {str(e)}")
+                    await asyncio.sleep(retry_delay)
+                    retry_delay *= 2  # Exponential backoff
+                    continue
+                else:
+                    print(f"Voice client initialization error: {str(e)}")
+                    raise
 
     async def start_processing(self):
         """Démarre le traitement en arrière-plan s'il n'est pas déjà en cours"""
@@ -521,83 +573,88 @@ class MusicPlayer:
             print(f"Error in delayed_disconnect: {e}")
 
     async def cleanup(self):
-        """Nettoie les ressources et les fichiers téléchargés"""
+        """
+        Nettoie les ressources du lecteur de musique
+        """
         try:
-            # Cancel all tasks first
+            # Cancel any pending tasks
+            if self.disconnect_task:
+                self.disconnect_task.cancel()
+                self.disconnect_task = None
+                
             if self.processing_task:
                 self.processing_task.cancel()
                 self.processing_task = None
-                
-            if self.batch_task:
-                self.batch_task.cancel()
-                self.batch_task = None
                 
             if self.loop_task:
                 self.loop_task.cancel()
                 self.loop_task = None
                 
-            if self.disconnect_task:
-                self.disconnect_task.cancel()
-                self.disconnect_task = None
-            
-            # Clear all queues
-            self.queue.clear()
-            self.batch_queue.clear()
-            if hasattr(self, 'preload_queue'):
-                self.preload_queue.clear()
-            
-            # Handle voice client
-            if self.voice_client:
-                try:
-                    if self.voice_client.is_playing():
-                        self.voice_client.stop()
-                    if self.voice_client.is_connected():
-                        await self.voice_client.disconnect()
-                except:
-                    pass
-                self.voice_client = None
-            
-            # Stop thread pools safely
-            if hasattr(self, 'thread_pool'):
-                if self.thread_pool and not getattr(self.thread_pool, '_shutdown', True):
-                    self.thread_pool.shutdown(wait=False)
-                self.thread_pool = None
+            if self.live_task:
+                self.live_task.cancel()
+                self.live_task = None
                 
-            if hasattr(self, 'search_pool'):
-                if self.search_pool and not getattr(self.search_pool, '_shutdown', True):
-                    self.search_pool.shutdown(wait=False)
-                self.search_pool = None
-            
-            # Clear all state variables
-            self.current = None
-            self._playing_lock = False if hasattr(self, '_playing_lock') else False
-            self.loop = False
-            self.loop_message = None
-            self.loop_song = None
-            self.loop_start_time = None
-            self.loop_user = None
-            
-            # Clear caches
-            if hasattr(self, '_cached_urls'):
-                self._cached_urls.clear()
-            if hasattr(self, '_song_cache'):
-                self._song_cache.clear()
-            
-            # Close aiohttp session
-            if not self.session.closed:
-                await self.session.close()
-            
-            # Force garbage collection
-            gc.collect()
-            
+            if self.batch_task:
+                self.batch_task.cancel()
+                self.batch_task = None
+                
+            if self._preload_task:
+                self._preload_task.cancel()
+                self._preload_task = None
+
             # Stop current display
             if self.current_display:
                 await self.current_display.stop()
                 self.current_display = None
-            
+
+            # Stop live stream if active
+            if self.live_stream:
+                await self.stop_live()
+
+            # Clear queues
+            self.queue.clear()
+            self.preload_queue.clear()
+            self.batch_queue.clear()
+            self._cached_urls.clear()
+            self._song_cache.clear()
+
+            # Stop current playback
+            if self.voice_client and self.voice_client.is_playing():
+                self.voice_client.stop()
+
+            # Disconnect voice client gracefully
+            if self.voice_client:
+                try:
+                    if self.voice_client.is_connected():
+                        await self.voice_client.disconnect(force=True)
+                except Exception as e:
+                    print(f"Error disconnecting voice client: {e}")
+                finally:
+                    self.voice_client = None
+
+            # Shutdown thread pools
+            if hasattr(self, 'thread_pool'):
+                self.thread_pool.shutdown(wait=False)
+            if hasattr(self, 'search_pool'):
+                self.search_pool.shutdown(wait=False)
+
+            # Close aiohttp session
+            if hasattr(self, 'session'):
+                await self.session.close()
+
+            # Clear current song
+            self.current = None
+            self.loop = False
+            self.loop_song = None
+            self.live_stream = None
+
+            # Force garbage collection
+            gc.collect()
+
         except Exception as e:
             print(f"Error during cleanup: {e}")
-            raise
+            # Ensure voice client is cleared even if cleanup fails
+            self.voice_client = None
 
     async def preload_next_songs(self):
         """

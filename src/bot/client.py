@@ -6,6 +6,7 @@ import yt_dlp
 from utils.config import load_config
 from utils.constants import YTDL_OPTIONS, MESSAGES, COLORS
 import logging
+import asyncio
 
 class MusicBot(commands.Bot):
     """
@@ -102,7 +103,43 @@ class MusicBot(commands.Bot):
             - Déconnecte automatiquement le bot s'il est seul
             - Gère le nettoyage des ressources lors de la déconnexion
         """
-        # ... code existant ...
+        # Ignore bot's own voice state changes
+        if member.id == self.user.id:
+            return
+            
+        # Get the guild from the voice state
+        guild = member.guild
+        if guild.id not in self.music_players:
+            return
+            
+        player = self.music_players[guild.id]
+        
+        # Check if bot is alone in the voice channel
+        if player.voice_client and player.voice_client.channel:
+            voice_members = [m for m in player.voice_client.channel.members if not m.bot]
+            
+            # If bot is alone, start disconnect timer
+            if len(voice_members) == 0:
+                if player.disconnect_task:
+                    player.disconnect_task.cancel()
+                player.disconnect_task = asyncio.create_task(player.delayed_disconnect())
+            else:
+                # Cancel disconnect timer if people joined
+                if player.disconnect_task:
+                    player.disconnect_task.cancel()
+                    player.disconnect_task = None
+        
+        # Handle bot being moved or disconnected
+        if member.id == self.user.id:
+            if before.channel and not after.channel:
+                # Bot was disconnected
+                if guild.id in self.music_players:
+                    await self.music_players[guild.id].cleanup()
+            elif before.channel and after.channel and before.channel != after.channel:
+                # Bot was moved to different channel
+                # Update the voice client reference
+                if guild.id in self.music_players:
+                    self.music_players[guild.id].voice_client = after.channel.guild.voice_client
 
     async def on_command_error(self, ctx, error):
         """Global command error handler"""

@@ -30,11 +30,49 @@
         - Recursive calls `await self.play_next()` within error handlers are ineffective due to `_playing_lock`.
         - **PLAN**: Modify error handling in `play_next` (for `info is None` and general `except Exception`) to schedule `self.play_next()` via `self.bot.loop.create_task()` instead of direct await, ensuring `self.current` is cleared and the method returns, to allow lock release and proper subsequent execution.
 
+## NEW ISSUE: Voice Connection Loop (Error 4006)
+
+### Problem Description:
+- Bot joins voice channel then immediately leaves, creating an infinite loop
+- Error code 4006: "Session Invalid" - Discord voice session becomes invalid
+- Occurs when using `!p`, `!p5`, `!p10` commands
+- Started happening recently (June 18, 2025)
+
+### Root Causes Identified:
+1. **Session invalidation** - Voice session becomes invalid due to network issues or Discord API changes
+2. **Connection state management** - Improper handling of existing voice clients
+3. **Auto-reconnect loops** - `reconnect=True` parameter causing infinite retry loops
+4. **Race conditions** - Multiple connection attempts happening simultaneously
+
+### Fixes Applied:
+- [x] **Enhanced `ensure_voice_client()` method**:
+  - Added proper cleanup of invalid voice clients before connecting
+  - Disabled auto-reconnect (`reconnect=False`) to prevent loops
+  - Added connection verification after establishment
+  - Implemented exponential backoff retry mechanism (3 attempts)
+  - Reduced connection timeout from 60s to 30s
+  - Added proper error handling for "Already connected" scenarios
+
+- [x] **Improved `on_voice_state_update()` handler**:
+  - Added complete voice state management in `bot/client.py`
+  - Proper handling of bot disconnections and channel moves
+  - Automatic cleanup when bot is alone in voice channel
+
+- [x] **Enhanced `cleanup()` method**:
+  - More robust voice client disconnection
+  - Better task cancellation and resource cleanup
+  - Graceful error handling during cleanup
+
+### Testing Status:
+- [ ] User to test the fixes and provide feedback
+- [ ] Monitor for any remaining connection issues
+
 ## Completions:
 
 - Successfully updated `pip`.
 - Successfully updated `yt-dlp` from `2025.3.31` to `2025.04.30`.
 - Added `src/config/config.yaml` to `.gitignore`.
+- Fixed voice connection loop issue with error code 4006.
 
 # Bot Optimization Plan
 
