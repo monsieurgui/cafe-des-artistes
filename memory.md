@@ -87,6 +87,16 @@
   - This addresses potential compatibility issues with Discord's voice gateway
   - The 4006 error during voice handshake suggests a version compatibility issue
 
+- [x] **Advanced Connection Strategies** (For persistent 4006 errors):
+  - Implemented multiple connection strategies with fallback mechanisms
+  - Strategy 1: Standard connection with reduced timeout (15s)
+  - Strategy 2: Alternative connection with muted state
+  - Strategy 3: Reuse existing guild voice client
+  - Added `_handle_4006_error()` method with exponential backoff and jitter
+  - Increased retries to 5 attempts with longer delays
+  - Added random jitter to prevent connection thundering herd
+  - Enhanced error handling with proper connection cleanup between attempts
+
 ### Testing Status:
 - [ ] User to test the fixes and provide feedback
 - [ ] Monitor for any remaining connection issues
