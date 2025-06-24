@@ -83,6 +83,7 @@
 
 - [x] **Dependency Updates** (Attempting to fix 4006 handshake errors):
   - Updated `discord.py` from `>=2.3.2` to `>=2.4.1` (latest stable version)
+  - Updated `yt-dlp` from `>=2025.4.30` to `>=2025.06.09` (latest stable version)
   - Added `websockets>=12.0` for better WebSocket connection stability
   - This addresses potential compatibility issues with Discord's voice gateway
   - The 4006 error during voice handshake suggests a version compatibility issue
@@ -108,6 +109,18 @@
     - Added 5-second gateway reset delay after 4006 errors
     - Implemented 4 different connection strategies with fallbacks
   - **Next Steps**: Monitor Discord status and community reports for similar issues
+
+- [x] **Rotterdam Voice Region Fix** (January 27, 2025):
+  - **Solution**: Force all voice connections to Rotterdam region specifically
+  - **Implementation**: Modified `ensure_voice_client()` to set guild region to Rotterdam before connection
+  - **Rationale**: 4006 errors may be region-specific, Rotterdam is a stable EU region
+  - **Changes Made**:
+    - Added `await guild.edit(region=discord.VoiceRegion.rotterdam)` before connection attempts
+    - Updated all 4 connection strategies to use Rotterdam region
+    - Added proper error handling for region change permissions
+    - Increased timeouts for all strategies (15s, 20s, 30s)
+    - Added success logging to track which strategy works
+  - **Expected Result**: Should bypass US East region issues causing 4006 errors
 
 ### Testing Status:
 - [ ] User to test the fixes and provide feedback

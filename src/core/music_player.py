@@ -217,21 +217,39 @@ class MusicPlayer:
                             self.voice_client = guild.voice_client
                             return
                         
-                        # Try different connection strategies
+                        # Try different connection strategies - All forced to Rotterdam region
                         connection_success = False
+                        channel = self.ctx.author.voice.channel
                         
-                        # Strategy 1: Standard connection
+                        # Force Rotterdam region for all strategies
                         try:
-                            print(f"Attempting standard voice connection (attempt {attempt + 1})")
-                            self.voice_client = await self.ctx.author.voice.channel.connect(
+                            # Set the guild's voice region to Rotterdam to force all connections there
+                            print(f"Forcing voice connection to Rotterdam region (attempt {attempt + 1})")
+                            if guild.region != discord.VoiceRegion.rotterdam:
+                                try:
+                                    await guild.edit(region=discord.VoiceRegion.rotterdam)
+                                    print("Guild voice region changed to Rotterdam")
+                                    await asyncio.sleep(2)  # Wait for region change to propagate
+                                except discord.Forbidden:
+                                    print("No permission to change guild region, proceeding with current region")
+                                except discord.HTTPException as e:
+                                    print(f"Failed to change guild region: {e}")
+                        except Exception as e:
+                            print(f"Error setting Rotterdam region: {e}")
+                        
+                        # Strategy 1: Standard connection to Rotterdam
+                        try:
+                            print(f"Attempting Rotterdam voice connection (attempt {attempt + 1})")
+                            self.voice_client = await channel.connect(
                                 timeout=15.0,  # Reduced timeout
                                 reconnect=False,
                                 self_deaf=True,
                                 self_mute=False
                             )
                             connection_success = True
+                            print(f"Successfully connected to voice channel in Rotterdam region")
                         except Exception as e:
-                            print(f"Standard connection failed: {e}")
+                            print(f"Rotterdam connection failed: {e}")
                             # Clear any partial connection
                             if self.voice_client:
                                 try:
@@ -243,19 +261,20 @@ class MusicPlayer:
                         # Strategy 2: Try with different parameters if standard failed
                         if not connection_success:
                             try:
-                                print(f"Attempting alternative voice connection (attempt {attempt + 1})")
+                                print(f"Attempting alternative Rotterdam connection (attempt {attempt + 1})")
                                 # Wait a bit before retry
                                 await asyncio.sleep(1)
                                 
-                                self.voice_client = await self.ctx.author.voice.channel.connect(
-                                    timeout=10.0,
+                                self.voice_client = await channel.connect(
+                                    timeout=20.0,
                                     reconnect=False,
                                     self_deaf=True,
                                     self_mute=True  # Try muted
                                 )
                                 connection_success = True
+                                print(f"Successfully connected with alternative method to Rotterdam")
                             except Exception as e:
-                                print(f"Alternative connection failed: {e}")
+                                print(f"Alternative Rotterdam connection failed: {e}")
                                 if self.voice_client:
                                     try:
                                         await self.voice_client.disconnect(force=True)
@@ -263,22 +282,23 @@ class MusicPlayer:
                                         pass
                                     self.voice_client = None
                         
-                        # Strategy 3: Try with longer timeout and different parameters
+                        # Strategy 3: Try with longer timeout
                         if not connection_success:
                             try:
-                                print(f"Attempting extended timeout connection (attempt {attempt + 1})")
+                                print(f"Attempting extended timeout Rotterdam connection (attempt {attempt + 1})")
                                 # Wait longer before this attempt
-                                await asyncio.sleep(2)
+                                await asyncio.sleep(3)
                                 
-                                self.voice_client = await self.ctx.author.voice.channel.connect(
-                                    timeout=25.0,  # Longer timeout
+                                self.voice_client = await channel.connect(
+                                    timeout=30.0,  # Longer timeout
                                     reconnect=False,
                                     self_deaf=False,  # Try not deafened
                                     self_mute=False
                                 )
                                 connection_success = True
+                                print(f"Successfully connected with extended timeout to Rotterdam")
                             except Exception as e:
-                                print(f"Extended timeout connection failed: {e}")
+                                print(f"Extended timeout Rotterdam connection failed: {e}")
                                 if self.voice_client:
                                     try:
                                         await self.voice_client.disconnect(force=True)
@@ -289,10 +309,11 @@ class MusicPlayer:
                         # Strategy 4: Try using guild voice client if available
                         if not connection_success and guild.voice_client:
                             try:
-                                print(f"Attempting to use existing guild voice client (attempt {attempt + 1})")
+                                print(f"Attempting to use existing guild voice client in Rotterdam (attempt {attempt + 1})")
                                 self.voice_client = guild.voice_client
                                 if self.voice_client.is_connected():
                                     connection_success = True
+                                    print(f"Using existing guild voice client")
                                 else:
                                     self.voice_client = None
                             except Exception as e:
