@@ -88,9 +88,8 @@
   - The 4006 error during voice handshake suggests a version compatibility issue
 
 - [x] **Discord.py 4006 Fix** (January 27, 2025):
-  - **Solution**: Installed discord.py directly from the PR branch that fixes 4006 errors.
-  - **Source**: [Discord.py PR #10210](https://github.com/Rapptz/discord.py/pull/10210)
-  - **Installation**: `git+https://github.com/Rapptz/discord.py.git@398bdbec`
+  - **Source**: [DA-344/d.py fix/voice-issues branch](https://github.com/DA-344/d.py/tree/fix/voice-issues)
+  - **Installation**: `git+https://github.com/DA-344/d.py.git@fix/voice-issues#egg=discord.py`
   - **What it fixes**:
     - 4006 errors caused by incorrect voice endpoint port handling.
     - Upgrades voice protocol to v8.
