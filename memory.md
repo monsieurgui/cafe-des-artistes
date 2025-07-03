@@ -124,14 +124,15 @@
   - The 4006 error during voice handshake suggests a version compatibility issue
 
 - [x] **Discord.py 4006 Fix** (January 27, 2025):
-  - **Source**: [DA-344/d.py fix/voice-issues branch](https://github.com/DA-344/d.py/tree/fix/voice-issues)
-  - **Installation**: `git+https://github.com/DA-344/d.py.git@fix/voice-issues#egg=discord.py`
+  - **Source**: Originally from DA-344/d.py fix/voice-issues branch (now removed/merged)
+  - **Current Solution**: Using py-cord>=2.5.0 (actively maintained fork)
   - **What it fixes**:
-    - 4006 errors caused by incorrect voice endpoint port handling.
-    - Upgrades voice protocol to v8.
-    - Implements buffered resuming for voice connections.
-  - **Status**: ✅ Successfully installed the PR branch.
-  - **Update (July 2, 2025)**: The fix/voice-issues branch has been removed (likely merged). Updated to official discord.py v2.5.2+
+    - 4006 errors caused by incorrect voice endpoint port handling
+    - Voice protocol v8 support
+    - Buffered resuming for voice connections
+    - Better voice connection stability
+  - **Status**: ✅ Switched to py-cord for better voice support
+  - **Update (July 2, 2025)**: The DA-344 fork has been removed. Switched to py-cord which is an actively maintained fork of discord.py with better voice handling and ongoing development. Py-cord is fully compatible with discord.py code.
 
 - [x] **Advanced Connection Strategies** (For persistent 4006 errors):
   - Implemented multiple connection strategies with fallback mechanisms
