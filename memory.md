@@ -22,6 +22,9 @@
   - Reduced thread queue size from 4096 to 512
   - Added buffer size parameter
   - Improved thread handling
+- [x] **Updated discord.py** from custom fix branch to official v2.5.2+:
+  - The DA-344/d.py fix/voice-issues branch was removed (likely merged)
+  - Switched to official discord.py release which should include the voice fixes
 
 ## Testing Required:
 - [ ] User to test bot with YouTube videos
@@ -128,6 +131,7 @@
     - Upgrades voice protocol to v8.
     - Implements buffered resuming for voice connections.
   - **Status**: ✅ Successfully installed the PR branch.
+  - **Update (July 2, 2025)**: The fix/voice-issues branch has been removed (likely merged). Updated to official discord.py v2.5.2+
 
 - [x] **Advanced Connection Strategies** (For persistent 4006 errors):
   - Implemented multiple connection strategies with fallback mechanisms
