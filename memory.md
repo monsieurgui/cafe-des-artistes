@@ -2,6 +2,7 @@
 
 ## Tasks:
 
+- [x] **Fix "403 Forbidden" error**: The `yt-dlp` version was outdated, causing HTTP 403 errors when fetching from YouTube. Updated from a non-existent version to `2024.03.10` in `src/requirements.txt`.
 - [x] Check `yt-dlp` version and update if necessary.
   - Current version: `2025.3.31`
   - Latest version: `2025.04.30`
