@@ -1,3 +1,35 @@
+# Bot Troubleshooting: YouTube 403 Forbidden Error (July 2, 2025)
+
+## Issue:
+- HTTP 403 Forbidden errors when accessing YouTube videos
+- ffmpeg unable to access HLS playlist segments
+- Error: "Invalid data found when processing input"
+- Started happening today (July 2, 2025)
+
+## Root Cause:
+- YouTube has been implementing changes to their API and access methods
+- The bot was using an outdated yt-dlp version (2025.06.09)
+- YouTube is gradually enforcing restrictions on certain clients (especially the 'tv' client)
+
+## Fixes Applied:
+- [x] **Updated yt-dlp** from `2025.06.09` to `2025.06.30` (latest stable version)
+- [x] **Enhanced yt-dlp configuration** in `src/utils/constants.py`:
+  - Added `extractor_args` to use 'android' and 'web' clients instead of 'tv'
+  - Added options to skip HLS/DASH manifests that were causing 403 errors
+  - Added proper user agent and referer headers
+  - Increased HTTP chunk size for better streaming
+- [x] **Updated FFmpeg options** for better streaming stability:
+  - Reduced thread queue size from 4096 to 512
+  - Added buffer size parameter
+  - Improved thread handling
+
+## Testing Required:
+- [ ] User to test bot with YouTube videos
+- [ ] Monitor for any remaining 403 errors
+- [ ] Check if audio quality and streaming stability are maintained
+
+---
+
 # Bot Troubleshooting: "SONG_UNAVAILABLE" Error
 
 ## Tasks:

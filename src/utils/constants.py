@@ -24,7 +24,19 @@ YTDL_OPTIONS = {
     'source_address': '0.0.0.0',
     'ignoreerrors': True,
     'no_color': True,
-    'extract_flat': 'in_playlist'
+    'extract_flat': 'in_playlist',
+    # Additional options to handle YouTube changes
+    'extractor_args': {
+        'youtube': {
+            'player_client': ['android', 'web'],  # Try Android client first, then web
+            'player_skip': ['configs', 'js'],  # Skip some unnecessary requests
+            'skip': ['hls', 'dash'],  # Skip HLS/DASH manifests if they cause issues
+        }
+    },
+    'http_chunk_size': 10485760,  # 10MB chunks
+    # Additional headers to mimic browser
+    'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
+    'referer': 'https://www.youtube.com/',
 }
 
 # Configuration YT-DLP pour le téléchargement
@@ -63,8 +75,8 @@ YTDL_OPTIONS_LIVE = {
 
 # Configuration FFMPEG
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -thread_queue_size 4096',
-    'options': '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le -flags low_delay -threads 1'
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -analyzeduration 0 -loglevel error -thread_queue_size 512',
+    'options': '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le -flags low_delay -threads 2 -bufsize 2048k'
 }
 
 # Couleurs des Embeds Discord
