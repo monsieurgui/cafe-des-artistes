@@ -715,145 +715,69 @@ class MusicPlayer:
         return embed
 
     async def delayed_disconnect(self):
-        """
-        Déconnecte le bot après 30 minutes d'inactivité
-        Peut être annulé si une nouvelle chanson est ajoutée
-        """
-        try:
-            # Send warning message
-            warning_embed = discord.Embed(
-                description=MESSAGES['WAIT_MESSAGE'],
-                color=COLORS['WARNING']
-            )
-            await self.ctx.send(embed=warning_embed)
+        """Déconnecte le bot après une période d'inactivité"""
+        await asyncio.sleep(self.bot.config['disconnection_delay'])
+        if self.voice_client and not self.voice_client.is_playing() and not self.queue:
+            await self.cleanup()
             
-            # Wait 30 minutes
-            await asyncio.sleep(1800)  # 30 minutes
-            
-            # Check conditions for disconnect
-            should_disconnect = (
-                self.voice_client and 
-                not self.voice_client.is_playing() and 
-                len(self.queue) == 0
-            )
-            
-            if should_disconnect:
-                embed = discord.Embed(
-                    description=MESSAGES['GOODBYE'],
-                    color=COLORS['WARNING']
-                )
-                await self.ctx.send(embed=embed)
-                
-                # Stop keepalive before cleanup
-                await self._stop_voice_keepalive()
-                await self.cleanup()
-                
-        except asyncio.CancelledError:
-            pass
-        except Exception as e:
-            print(f"Error in delayed_disconnect: {e}")
-
     async def cleanup(self):
-        """
-        Nettoie les ressources du lecteur de musique
-        """
+        """Nettoie toutes les ressources et déconnecte le bot"""
+        print("Starting cleanup...")
+        
+        # Arrête la lecture en cours et vide la file d'attente
+        if self.voice_client and self.voice_client.is_playing():
+            self.voice_client.stop()
+        
+        self.queue.clear()
+        self.preload_queue.clear()
+        self.current = None
+        
+        # Stop any running tasks
+        for task in [self.disconnect_task, self.loop_task, self.live_task, self.processing_task, self._preload_task]:
+            if task:
+                task.cancel()
+        
+        self.disconnect_task = self.loop_task = self.live_task = self.processing_task = self._preload_task = None
+
+        await self._stop_voice_keepalive()
+
+        # Cleanup current display
+        if self.current_display:
+            await self.current_display.cleanup()
+            self.current_display = None
+        
+        # Disconnect from voice channel
+        if self.voice_client:
+            try:
+                await self.voice_client.disconnect(force=True)
+            except Exception as e:
+                print(f"Error disconnecting voice client: {e}")
+            finally:
+                self.voice_client = None
+        
+        # Close aiohttp session
+        if self.session and not self.session.closed:
+            await self.session.close()
+
+        # Remove player from bot's music players
+        if self.ctx.guild.id in self.bot.music_players:
+            del self.bot.music_players[self.ctx.guild.id]
+
+        # Shutdown thread pools as the very last step
         try:
-            # Cancel any pending tasks
-            if self.disconnect_task:
-                self.disconnect_task.cancel()
-                self.disconnect_task = None
-                
-            if self.processing_task:
-                self.processing_task.cancel()
-                self.processing_task = None
-                
-            if self.loop_task:
-                self.loop_task.cancel()
-                self.loop_task = None
-                
-            if self.live_task:
-                self.live_task.cancel()
-                self.live_task = None
-                
-            if self.batch_task:
-                self.batch_task.cancel()
-                self.batch_task = None
-                
-            if self._preload_task:
-                self._preload_task.cancel()
-                self._preload_task = None
-
-            # Stop voice keepalive task
-            await self._stop_voice_keepalive()
-
-            # Stop current display
-            if self.current_display:
-                await self.current_display.stop()
-                self.current_display = None
-
-            # Stop live stream if active
-            if self.live_stream:
-                await self.stop_live()
-
-            # Clear queues
-            self.queue.clear()
-            self.preload_queue.clear()
-            self.batch_queue.clear()
-            self._cached_urls.clear()
-            self._song_cache.clear()
-
-            # Stop current playback
-            if self.voice_client and self.voice_client.is_playing():
-                self.voice_client.stop()
-
-            # Disconnect voice client gracefully
-            if self.voice_client:
-                try:
-                    if self.voice_client.is_connected():
-                        await self.voice_client.disconnect(force=True)
-                except Exception as e:
-                    print(f"Error disconnecting voice client: {e}")
-                finally:
-                    self.voice_client = None
-
-            # Shutdown thread pools
-            if hasattr(self, 'thread_pool'):
-                self.thread_pool.shutdown(wait=False)
-            if hasattr(self, 'search_pool'):
-                self.search_pool.shutdown(wait=False)
-
-            # Close aiohttp session
-            if hasattr(self, 'session'):
-                await self.session.close()
-
-            # Clear current song
-            self.current = None
-            self.loop = False
-            self.loop_song = None
-            self.live_stream = None
-
-            # Force garbage collection
-            gc.collect()
-
+            print("Shutting down thread pools...")
+            self.thread_pool.shutdown(wait=False, cancel_futures=True)
+            self.search_pool.shutdown(wait=False, cancel_futures=True)
+            print("Thread pools shut down.")
         except Exception as e:
-            print(f"Error during cleanup: {e}")
-            # Ensure voice client is cleared even if cleanup fails
-            self.voice_client = None
+            print(f"Error shutting down thread pools: {e}")
+
+        # Finally, run garbage collection
+        gc.collect()
+        print("Cleanup complete.")
 
     async def preload_next_songs(self):
-        """
-        Précharge les prochaines chansons de la file d'attente.
-        
-        Cette méthode optimise la lecture en :
-        - Préchargeant jusqu'à 3 chansons à l'avance
-        - Vérifiant la validité des URLs
-        - Mettant en cache les informations des vidéos
-        
-        Notes:
-            - Utilise un système de cache pour éviter les requêtes répétées
-            - Gère automatiquement la mémoire en limitant le nombre de préchargements
-            - S'exécute de manière asynchrone pour ne pas bloquer la lecture
-        """
+        """Précharge les informations pour les prochaines chansons dans la file d'attente"""
         while len(self.preload_queue) < 3 and self.queue:
             next_song = self.queue[0]
             future = self.thread_pool.submit(self.download_song, next_song)
