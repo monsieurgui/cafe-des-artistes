@@ -415,7 +415,7 @@ class MusicPlayer:
                     'extract_flat': True,  # Only fetch metadata initially
                     'skip_download': True,
                     'force_generic_extractor': False,
-                    'socket_timeout': 1,  # Reduced timeout
+                    'socket_timeout': 5,  # Increased from 1
                     'retries': 1
                 }
                 
@@ -549,7 +549,7 @@ class MusicPlayer:
                 self.current_display = None
 
             if self.loop and self.loop_song:
-                next_song = self.loop_song
+                next_song = self.loop_song.copy()
             else:
                 if not self.queue:
                     self.current = None
@@ -557,8 +557,8 @@ class MusicPlayer:
                 next_song = self.queue.popleft()
 
             # Use cached info if available
-            if next_song['url'] in self._song_cache:
-                info = self._song_cache[next_song['url']]
+            if next_song.get('webpage_url', next_song['url']) in self._song_cache:
+                info = self._song_cache[next_song.get('webpage_url', next_song['url'])]
             else:
                 info = await asyncio.get_event_loop().run_in_executor(
                     self.thread_pool,
@@ -576,14 +576,18 @@ class MusicPlayer:
 
             # Store full info for display
             self.current = {
-                'url': info.get('webpage_url', next_song['url']),  # Use webpage_url first
+                'url': next_song['url'],
                 'title': info.get('title', 'Unknown'),
                 'duration': info.get('duration', 0),
                 'thumbnail': info.get('thumbnail', info.get('thumbnails', [{'url': None}])[0]['url']),
                 'webpage_url': info.get('webpage_url', info.get('url', next_song['url'])),
                 'channel': info.get('uploader', info.get('channel', 'Unknown')),
-                'view_count': info.get('view_count', 0)
+                'view_count': info.get('view_count', 0),
+                'retry_count': next_song.get('retry_count', 0)
             }
+            
+            # Cache the song info to avoid re-fetching
+            self._song_cache[self.current['webpage_url']] = info
 
             # Get the stream URL (this is different from webpage_url)
             stream_url = info.get('url', info.get('formats', [{}])[0].get('url'))
@@ -606,6 +610,14 @@ class MusicPlayer:
                     # Then proceed with next song
                     if error:
                         print(f"Error in playback: {error}")
+                        # Retry logic
+                        if self.current and self.current.get('retry_count', 0) < 1:
+                            print(f"Retrying '{self.current['title']}'...")
+                            self.current['retry_count'] += 1
+                            self.queue.appendleft(self.current)
+                        else:
+                            print(f"Failed to play '{self.current['title']}' after retries.")
+
                     await self.play_next()
 
                 asyncio.run_coroutine_threadsafe(cleanup(), self.bot.loop)
