@@ -1,9 +1,9 @@
 # Option 1: Use official discord.py (default)
-discord.py==2.5.2
+# discord.py==2.5.2
 
 # Option 2: Use py-cord - RECOMMENDED for better voice support
 # Py-cord is an actively maintained fork with improved voice handling
-# py-cord>=2.5.0
+py-cord>=2.5.0
 
 # Option 3: Use specific discord.py commit with known voice fixes
 # discord.py @ git+https://github.com/Rapptz/discord.py@a9824ff#egg=discord.py
