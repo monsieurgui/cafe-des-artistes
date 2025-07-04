@@ -80,20 +80,6 @@ class Music(commands.Cog):
                 color=COLORS['ERROR']
             ), delete_after=10)
 
-    @commands.Cog.listener()
-    async def on_command_error(self, ctx, error):
-        """Gère les erreurs de commandes"""
-        if isinstance(error, commands.CommandInvokeError):
-            error = error.original
-        
-        if isinstance(error, ValueError):
-            embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=str(error),
-                color=COLORS['ERROR']
-            )
-            await ctx.send(embed=embed, delete_after=10)
-
     @commands.command(name='quit', help='Quitte le canal vocal et vide la file d\'attente')
     async def quit(self, ctx):
         """Quitte le canal vocal et vide la file d'attente"""
