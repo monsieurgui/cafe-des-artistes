@@ -1,5 +1,5 @@
 # Option 1: Use official discord.py (default)
-discord.py==3.17.4
+discord.py==2.5.2
 
 # Option 2: Use py-cord - RECOMMENDED for better voice support
 # Py-cord is an actively maintained fork with improved voice handling
