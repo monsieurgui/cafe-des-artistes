@@ -12,7 +12,7 @@ YTDL_OPTIONS = {
     'nocheckcertificate': False,
     'noplaylist': True,
     'concurrent_fragment_downloads': 1,
-    'buffersize': 32768,
+    'buffersize': 65536,
     'postprocessors': [],
     'cachedir': False,
     'writethumbnail': False,
@@ -25,6 +25,7 @@ YTDL_OPTIONS = {
     'ignoreerrors': True,
     'no_color': True,
     'extract_flat': 'in_playlist',
+    'limit_rate': '2M',
     # Additional options to handle YouTube changes
     'extractor_args': {
         'youtube': {
@@ -33,7 +34,7 @@ YTDL_OPTIONS = {
             'skip': ['hls', 'dash'],  # Skip HLS/DASH manifests if they cause issues
         }
     },
-    'http_chunk_size': 10485760,  # 10MB chunks
+    'http_chunk_size': 5242880,
     # Additional headers to mimic browser
     'user_agent': 'Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/120.0.0.0 Safari/537.36',
     'referer': 'https://www.youtube.com/',
@@ -76,7 +77,7 @@ YTDL_OPTIONS_LIVE = {
 # Configuration FFMPEG
 FFMPEG_OPTIONS = {
     'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -analyzeduration 0 -loglevel error -thread_queue_size 512',
-    'options': '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le -flags low_delay -threads 2 -bufsize 2048k'
+    'options': '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le -flags low_delay -threads 1 -bufsize 4096k'
 }
 
 # Couleurs des Embeds Discord
