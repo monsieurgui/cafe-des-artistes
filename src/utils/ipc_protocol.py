@@ -50,6 +50,7 @@ class Command(Enum):
     DISCONNECT = "DISCONNECT" 
     ADD_TO_QUEUE = "ADD_TO_QUEUE"
     SKIP_SONG = "SKIP_SONG"
+    PLAY_NEXT = "PLAY_NEXT"
     GET_STATE = "GET_STATE"
     RESET_PLAYER = "RESET_PLAYER"
     REMOVE_FROM_QUEUE = "REMOVE_FROM_QUEUE"
@@ -224,6 +225,11 @@ def create_remove_from_queue_command(guild_id: int, song_index: int) -> CommandM
         guild_id,
         asdict(RemoveFromQueueData(song_index))
     )
+
+
+def create_play_next_command(guild_id: int) -> CommandMessage:
+    """Create a PLAY_NEXT command message"""
+    return CommandMessage(Command.PLAY_NEXT, guild_id, {})
 
 
 def create_song_started_event(guild_id: int, song_data: SongData) -> EventMessage:

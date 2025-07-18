@@ -18,7 +18,7 @@ import aiosqlite
 import asyncio
 import logging
 from datetime import datetime, timedelta
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, List
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -171,6 +171,40 @@ class DatabaseManager:
             except Exception as e:
                 self.logger.error(f"Failed to get guild settings for {guild_id}: {e}")
                 return None
+    
+    async def get_all_guild_settings(self) -> List[GuildSettings]:
+        """
+        Get all guild settings from the database
+        
+        Returns:
+            List of GuildSettings objects
+        """
+        async with self._lock:
+            try:
+                async with aiosqlite.connect(self.db_path) as db:
+                    db.row_factory = aiosqlite.Row
+                    
+                    async with db.execute('''
+                        SELECT guild_id, control_channel_id, queue_message_id, now_playing_message_id
+                        FROM guild_settings 
+                        ORDER BY guild_id
+                    ''') as cursor:
+                        
+                        rows = await cursor.fetchall()
+                        
+                        return [
+                            GuildSettings(
+                                guild_id=row['guild_id'],
+                                control_channel_id=row['control_channel_id'],
+                                queue_message_id=row['queue_message_id'],
+                                now_playing_message_id=row['now_playing_message_id']
+                            )
+                            for row in rows
+                        ]
+                            
+            except Exception as e:
+                self.logger.error(f"Failed to get all guild settings: {e}")
+                return []
     
     async def delete_guild_setup(self, guild_id: int) -> bool:
         """

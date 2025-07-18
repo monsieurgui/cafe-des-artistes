@@ -267,12 +267,13 @@ class MusicPlayerService:
                     self.queue.append(song_dict)
                     songs_added += 1
                 
-                # Send queue updated event
-                await self._send_queue_update()
-                
-                # Start playing if nothing is playing
-                if not self._playing_lock and (not self.current or not self.is_connected):
+                # Start playing only if nothing is currently playing
+                if not self._playing_lock and not self.current:
+                    # Don't send queue update here - play_next() will handle it
                     await self.play_next()
+                else:
+                    # Only send queue update if we're not starting playback
+                    await self._send_queue_update()
                 
                 self.logger.info(f"Added {songs_added} song(s) to queue")
                 return {
@@ -289,21 +290,30 @@ class MusicPlayerService:
     
     async def skip(self) -> dict:
         """
-        Skip the current song
+        Skip the current song and play next if available
         
         Returns:
             dict: Skip result
         """
         try:
-            if self.current and self.voice_client:
-                self.logger.info(f"Skipping current song in guild {self.guild_id}")
-                
-                if hasattr(self.voice_client, 'stop'):
-                    self.voice_client.stop()
-                
-                return {"status": "skipped", "song_title": self.current.get('title', 'Unknown')}
-            else:
+            if self.current is None:
                 return {"status": "nothing_playing"}
+            
+            skipped_song = self.current.get('title', 'Unknown')
+            self.logger.info(f"Skipping current song '{skipped_song}' in guild {self.guild_id}")
+            
+            # Clear current song
+            self.current = None
+            
+            # Check if there's a next song in the queue
+            if self.queue:
+                # Start next song automatically
+                await self.play_next()
+                return {"status": "skipped", "song_title": skipped_song}
+            else:
+                # No more songs, send idle event
+                await self._send_player_idle()
+                return {"status": "skipped", "song_title": skipped_song}
                 
         except Exception as e:
             self.logger.error(f"Error skipping song: {e}")

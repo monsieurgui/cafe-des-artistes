@@ -188,6 +188,11 @@ class PlayerServiceApp:
                 )
             elif command == Command.SKIP_SONG:
                 result = await player.skip()
+            elif command == Command.PLAY_NEXT:
+                # Clear current song and play next from queue
+                player.current = None
+                await player.play_next()
+                result = {"status": "play_next_triggered"}
             elif command == Command.GET_STATE:
                 result = await player.get_state()
             elif command == Command.RESET_PLAYER:

@@ -16,6 +16,7 @@ services:
     volumes:
       - ./src/config/config.yaml:/app/src/config/config.yaml:ro
       - ./logs:/app/logs
+      - bot-data:/app/data
     networks:
       - cafebot-net
     depends_on:
@@ -50,3 +51,8 @@ networks:
   cafebot-net:
     driver: bridge
     name: cafebot-network
+
+volumes:
+  bot-data:
+    driver: local
+    name: cafe-bot-data

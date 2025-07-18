@@ -129,6 +129,9 @@ class MusicBot(commands.Bot):
         # Cleanup expired setup sessions on startup
         await self._cleanup_expired_setup_sessions()
         
+        # Restore interactive views for existing embed messages
+        await self._restore_embed_views()
+        
         # Note: Setup DMs are only sent when bot joins new guilds (on_guild_join event)
         # Not on every restart to avoid spamming owners of already-configured guilds
 
@@ -326,6 +329,67 @@ class MusicBot(commands.Bot):
         """Global event error handler"""
         print(f'Error in {event_method}:', file=sys.stderr)
         traceback.print_exc()
+
+    async def _restore_embed_views(self):
+        """Restore interactive views for existing embed messages after bot restart"""
+        logger = logging.getLogger(__name__)
+        logger.info("Restoring interactive views for existing embed messages...")
+        
+        try:
+            from utils.database import get_database_manager
+            db_manager = await get_database_manager()
+            
+            # Get all guild settings from database
+            guild_settings_list = await db_manager.get_all_guild_settings()
+            
+            for guild_settings in guild_settings_list:
+                try:
+                    guild = self.get_guild(guild_settings.guild_id)
+                    if not guild:
+                        logger.warning(f"Guild {guild_settings.guild_id} not found, skipping view restoration")
+                        continue
+                    
+                    control_channel = guild.get_channel(guild_settings.control_channel_id)
+                    if not control_channel:
+                        logger.warning(f"Control channel {guild_settings.control_channel_id} not found for guild {guild.name}")
+                        continue
+                    
+                    # Try to fetch the queue message and restore its view
+                    try:
+                        queue_message = await control_channel.fetch_message(guild_settings.queue_message_id)
+                        
+                        # Get current queue data from Player Service
+                        queue_data = []
+                        try:
+                            response = await self.ipc_manager.send_command(guild_settings.guild_id, "GET_STATE")
+                            if response and response.get('status') == 'success':
+                                queue_data = response.get('data', {}).get('queue', [])
+                        except Exception as e:
+                            logger.warning(f"Could not get queue data for guild {guild.name}: {e}")
+                        
+                        # Create and attach the QueueView to the message
+                        from cogs.music import QueueView
+                        queue_view = QueueView(queue_data, current_page=1, bot=self, guild_id=guild_settings.guild_id)
+                        queue_embed = queue_view._generate_queue_embed()
+                        
+                        # Update the message with the restored view
+                        await queue_message.edit(embed=queue_embed, view=queue_view)
+                        logger.info(f"Restored queue view for guild {guild.name}")
+                        
+                    except discord.NotFound:
+                        logger.warning(f"Queue message {guild_settings.queue_message_id} not found for guild {guild.name}")
+                    except discord.Forbidden:
+                        logger.warning(f"No permission to edit queue message for guild {guild.name}")
+                    except Exception as e:
+                        logger.error(f"Error restoring queue view for guild {guild.name}: {e}")
+                        
+                except Exception as e:
+                    logger.error(f"Error processing guild {guild_settings.guild_id}: {e}")
+                    
+        except Exception as e:
+            logger.error(f"Error restoring embed views: {e}")
+        
+        logger.info("Embed view restoration completed")
 
     async def close(self):
         """Clean shutdown of the bot"""

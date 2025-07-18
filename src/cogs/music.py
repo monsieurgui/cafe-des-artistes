@@ -215,7 +215,7 @@ class Music(commands.Cog):
     async def ensure_voice_channel(self, interaction: discord.Interaction):
         """Ensure the bot is connected to the user's voice channel"""
         if not interaction.user.voice:
-            raise ValueError(MESSAGES['VOICE_CHANNEL_REQUIRED'])
+            raise ValueError("You must be in a voice channel to use this command.")
         
         channel = interaction.user.voice.channel
         
@@ -254,7 +254,14 @@ class Music(commands.Cog):
     async def play(self, interaction: discord.Interaction, query: str):
         """Play a song or playlist from YouTube"""
         try:
-            await interaction.response.defer()
+            from utils.embeds import loading, success, error
+            
+            # Initial ephemeral response with loading message
+            await interaction.response.send_message(
+                embed=loading("Searching for your song..."),
+                ephemeral=True
+            )
+            
             await self.ensure_voice_channel(interaction)
             
             # Send command to Player Service via IPC
@@ -265,68 +272,66 @@ class Music(commands.Cog):
             if result['status'] == 'success':
                 data = result.get('data', {})
                 if data.get('status') == 'added':
-                    embed = discord.Embed(
-                        description=MESSAGES['SONG_ADDED'].format(
-                            title=data.get('song_title', 'Unknown'),
-                            queue_size=data.get('queue_size', 0)
-                        ),
-                        color=COLORS['SUCCESS']
-                    )
-                    await interaction.followup.send(embed=embed)
+                    # Song added to queue
+                    message = f"Added **{data.get('song_title', 'Unknown')}** to the queue."
+                    await interaction.edit_original_response(embed=success(message))
                 else:
-                    embed = discord.Embed(
-                        description=f"Now playing: {data.get('song_title', 'Unknown')}",
-                        color=COLORS['SUCCESS']
-                    )
-                    await interaction.followup.send(embed=embed)
+                    # Now playing
+                    message = f"Added **{data.get('song_title', 'Unknown')}** to the queue."
+                    await interaction.edit_original_response(embed=success(message))
             else:
                 raise ValueError(result.get('message', 'Unknown error'))
                 
         except Exception as e:
-            embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=str(e),
-                color=COLORS['ERROR']
-            )
-            if interaction.response.is_done():
-                await interaction.followup.send(embed=embed, ephemeral=True)
+            # Handle voice channel error specifically
+            if "voice channel" in str(e).lower():
+                await interaction.edit_original_response(
+                    embed=error("You must be in a voice channel to use this command.")
+                )
             else:
-                await interaction.response.send_message(embed=embed, ephemeral=True)
+                await interaction.edit_original_response(
+                    embed=error(f"Failed to play song: {str(e)}")
+                )
 
     @app_commands.command(name="skip", description="Skip the current song")
     async def skip(self, interaction: discord.Interaction):
         """Skip the current song"""
         try:
-            await interaction.response.defer()
+            from utils.embeds import success, warning, error
             
+            # First, stop any currently playing audio on the bot client
+            if interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
+                interaction.guild.voice_client.stop()
+            
+            # Then send skip command to player service
             result = await self.bot.ipc_manager.ipc_client.skip_song(interaction.guild.id)
             
             if result['status'] == 'success':
                 data = result.get('data', {})
                 if data.get('status') == 'skipped':
-                    embed = discord.Embed(
-                        description=MESSAGES['SKIPPED'],
-                        color=COLORS['SUCCESS']
+                    await interaction.response.send_message(
+                        embed=success("The current song has been skipped."),
+                        ephemeral=True
                     )
-                    await interaction.followup.send(embed=embed)
                 elif data.get('status') == 'nothing_playing':
-                    await interaction.followup.send(MESSAGES['NOTHING_PLAYING'])
+                    await interaction.response.send_message(
+                        embed=warning("No song is currently playing."),
+                        ephemeral=True
+                    )
             else:
                 raise ValueError(result.get('message', 'Unknown error'))
                 
         except Exception as e:
-            embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=str(e),
-                color=COLORS['ERROR']
+            await interaction.response.send_message(
+                embed=error(f"Failed to skip song: {str(e)}"),
+                ephemeral=True
             )
-            await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="leave", description="Disconnect the bot from voice channel")
     async def leave(self, interaction: discord.Interaction):
         """Disconnect the bot from voice channel and clear queue"""
         try:
-            await interaction.response.defer()
+            from utils.embeds import success, error
             
             # Reset player and disconnect
             await self.bot.ipc_manager.ipc_client.reset_player(interaction.guild.id)
@@ -336,26 +341,30 @@ class Music(commands.Cog):
             if interaction.guild.voice_client:
                 await interaction.guild.voice_client.disconnect()
             
-            embed = discord.Embed(
-                description=MESSAGES['GOODBYE'],
-                color=COLORS['WARNING']
+            await interaction.response.send_message(
+                embed=success("Disconnected from the voice channel."),
+                ephemeral=True
             )
-            await interaction.followup.send(embed=embed)
             
         except Exception as e:
-            embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=str(e),
-                color=COLORS['ERROR']
+            await interaction.response.send_message(
+                embed=error(f"Failed to disconnect: {str(e)}"),
+                ephemeral=True
             )
-            await interaction.followup.send(embed=embed, ephemeral=True)
 
     @app_commands.command(name="p5", description="Play a song 5 times")
     @app_commands.describe(query="Song name, artist, or YouTube URL to play 5 times")
     async def p5(self, interaction: discord.Interaction, query: str):
         """Play a song 5 times"""
         try:
-            await interaction.response.defer()
+            from utils.embeds import loading, success, error
+            
+            # Initial ephemeral response with loading message
+            await interaction.response.send_message(
+                embed=loading("Searching for your song..."),
+                ephemeral=True
+            )
+            
             await self.ensure_voice_channel(interaction)
             
             result = await self.bot.ipc_manager.ipc_client.add_to_queue(
@@ -364,54 +373,60 @@ class Music(commands.Cog):
             
             if result['status'] == 'success':
                 data = result.get('data', {})
-                embed = discord.Embed(
-                    description=MESSAGES['SONGS_ADDED'].format(total=data.get('songs_added', 5)),
-                    color=COLORS['SUCCESS']
-                )
-                await interaction.followup.send(embed=embed)
+                song_title = data.get('song_title', 'Unknown')
+                message = f"Added **{song_title}** to the queue (5 times)."
+                await interaction.edit_original_response(embed=success(message))
             else:
                 raise ValueError(result.get('message', 'Unknown error'))
                 
         except Exception as e:
-            embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=str(e),
-                color=COLORS['ERROR']
-            )
-            await interaction.followup.send(embed=embed, ephemeral=True)
+            # Handle voice channel error specifically
+            if "voice channel" in str(e).lower():
+                await interaction.edit_original_response(
+                    embed=error("You must be in a voice channel to use this command.")
+                )
+            else:
+                await interaction.edit_original_response(
+                    embed=error(f"Failed to play song: {str(e)}")
+                )
 
     @app_commands.command(name="reset", description="Clear the queue and stop playback")
     async def reset(self, interaction: discord.Interaction):
         """Clear the queue and stop playback"""
+        from utils.embeds import success, error
+        
+        # Respond immediately to prevent timeout
+        await interaction.response.send_message(
+            embed=success("Resetting player..."),
+            ephemeral=True
+        )
+        
         try:
-            # Defer the response as specified in the requirements
-            await interaction.response.defer()
-            
             # Send RESET_PLAYER command to the Player Service for the guild_id
             # This tells the player to clear its queue and stop playback
             result = await self.bot.ipc_manager.ipc_client.reset_player(interaction.guild.id)
             
             if result['status'] == 'success':
+                # Stop any now playing updates
+                await self.stop_now_playing_updates(interaction.guild.id)
+                
                 # Find and clear the content of the Queue and Now Playing embeds 
                 # in the control channel as specified in the requirements
                 await self._clear_control_panel_embeds(interaction.guild.id)
                 
-                # Respond with confirmation message as specified
-                embed = discord.Embed(
-                    description="🔄 Queue cleared and playback stopped.",
-                    color=COLORS['SUCCESS']
+                # Update the response with success message
+                await interaction.edit_original_response(
+                    embed=success("The player has been reset. The queue is now empty.")
                 )
-                await interaction.followup.send(embed=embed)
             else:
-                raise ValueError(result.get('message', 'Unknown error'))
+                await interaction.edit_original_response(
+                    embed=error(f"Failed to reset player: {result.get('message', 'Unknown error')}")
+                )
                 
         except Exception as e:
-            embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=str(e),
-                color=COLORS['ERROR']
+            await interaction.edit_original_response(
+                embed=error(f"Failed to reset player: {str(e)}")
             )
-            await interaction.followup.send(embed=embed, ephemeral=True)
 
     async def _clear_control_panel_embeds(self, guild_id: int):
         """Clear the content of Queue and Now Playing embeds in control channel"""
@@ -483,70 +498,79 @@ class Music(commands.Cog):
 
     def _generate_now_playing_embed(self, song_data=None, start_time=None):
         """
-        Generate the Now Playing embed for the control panel
+        Generate the Now Playing embed for the control panel with enhanced visual design
         
         Args:
             song_data: Song information dict or None
             start_time: When the song started playing (for progress calculation)
             
         Returns:
-            discord.Embed: The Now Playing embed
+            discord.Embed: The Now Playing embed with inline fields
         """
-        embed = discord.Embed(
-            title="🎶 Now Playing",
-            color=COLORS['INFO']
-        )
-        
         if not song_data:
-            # No song playing state as specified in requirements
-            embed.description = "No song playing"
+            # Idle state - No song playing
+            embed = discord.Embed(
+                title="No Song Playing",
+                description="",
+                color=COLORS['INFO']
+            )
             embed.set_footer(text="Use /play to start playing music")
+            
             return embed
         
-        # Song is playing - reuse existing design (title, progress bar, thumbnail, duration)
-        # and add footer showing "Added by: [Requester Name]" as specified
+        # Song is playing - new enhanced layout
+        song_title = song_data.get('title', 'Unknown')
+        song_url = song_data.get('webpage_url') or song_data.get('url')
         
-        # Song title as description
-        embed.description = song_data.get('title', 'Unknown')
+        # Create embed with song title as hyperlink if URL is available
+        if song_url:
+            embed = discord.Embed(
+                title=song_title,
+                url=song_url,
+                color=COLORS['INFO']
+            )
+        else:
+            embed = discord.Embed(
+                title=song_title,
+                color=COLORS['INFO']
+            )
         
-        # Duration and progress calculation
+        
+        # Duration and progress calculation for description
         duration = song_data.get('duration', 0)
         current_time = 0
         
         if start_time:
             current_time = (discord.utils.utcnow() - start_time).total_seconds()
         
-        # Add progress field if duration is available
+        # Description contains only the progress bar
         if duration and duration > 0:
             progress_text = (
                 f"`{self._format_duration(int(current_time))} / "
                 f"{self._format_duration(duration)}`\n"
                 f"{self._create_progress_bar(current_time, duration)}"
             )
-            embed.add_field(name="Progress", value=progress_text, inline=False)
+            embed.description = progress_text
         elif duration == 0:
             # Live stream
-            embed.add_field(name="Status", value="🔴 LIVE", inline=False)
+            embed.description = "🔴 **LIVE STREAM**"
+        else:
+            embed.description = ""
         
-        # Channel info
+        # Inline fields for metadata
+        # Field 1: Uploader
         if channel := song_data.get('channel'):
-            embed.add_field(name="Channel", value=channel, inline=True)
+            embed.add_field(name="📺 Uploader", value=channel, inline=True)
         
-        # View count if available
-        if view_count := song_data.get('view_count'):
-            embed.add_field(name="Views", value=f"{view_count:,}", inline=True)
+        # Field 2: Duration
+        if duration and duration > 0:
+            embed.add_field(name="⏱️ Duration", value=self._format_duration(duration), inline=True)
+        elif duration == 0:
+            embed.add_field(name="⏱️ Duration", value="Live", inline=True)
         
-        # Thumbnail
-        if thumbnail := song_data.get('thumbnail'):
-            embed.set_thumbnail(url=thumbnail)
-        
-        # URL
-        if url := song_data.get('webpage_url') or song_data.get('url'):
-            embed.url = url
-        
-        # Footer showing "Added by: [Requester Name]" as specified in requirements
+        # Field 3: Requested by
         requester = song_data.get('requester_name', song_data.get('requester', 'Unknown'))
-        embed.set_footer(text=f"Added by: {requester}")
+        embed.add_field(name="👤 Requested by", value=requester, inline=True)
         
         return embed
     
@@ -565,6 +589,9 @@ class Music(commands.Cog):
         try:
             from utils.database import get_guild_setup
             
+            logger = logging.getLogger(__name__)
+            logger.info(f"Updating now playing display for guild {guild_id}")
+            
             guild_settings = await get_guild_setup(guild_id)
             
             if guild_settings:
@@ -581,12 +608,22 @@ class Music(commands.Cog):
                             
                             # Update the message
                             await now_playing_message.edit(embed=embed)
+                            logger.info(f"Successfully updated now playing embed for guild {guild_id}")
                             
                         except discord.NotFound:
-                            pass  # Message was deleted
+                            logger.warning(f"Now playing message not found for guild {guild_id}")
+                        except discord.Forbidden:
+                            logger.error(f"No permission to edit now playing message for guild {guild_id}")
+                    else:
+                        logger.warning(f"Control channel not found for guild {guild_id}")
+                else:
+                    logger.warning(f"Guild {guild_id} not found")
+            else:
+                logger.warning(f"No guild settings found for guild {guild_id}")
                             
         except Exception as e:
-            print(f"Error updating now playing display: {e}")
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error updating now playing display: {e}")
 
     async def start_now_playing_updates(self, guild_id: int, song_data: dict):
         """
@@ -594,18 +631,28 @@ class Music(commands.Cog):
         Updates every 5 seconds as specified in requirements
         """
         try:
+            logger = logging.getLogger(__name__)
+            logger.info(f"Starting now playing updates for guild {guild_id}")
+            
             # Stop any existing update task for this guild
             await self.stop_now_playing_updates(guild_id)
             
             # Store the start time for progress calculation
-            self.guild_song_start_times[guild_id] = discord.utils.utcnow()
+            start_time = discord.utils.utcnow()
+            self.guild_song_start_times[guild_id] = start_time
             
-            # Create and start the update task
+            # Immediately update the now playing embed with the new song
+            await self.update_now_playing_display(guild_id, song_data, start_time)
+            
+            # Create and start the update task for periodic updates
             task = asyncio.create_task(self._update_now_playing_loop(guild_id, song_data))
             self.now_playing_update_tasks[guild_id] = task
             
+            logger.info(f"Now playing updates task started for guild {guild_id}")
+            
         except Exception as e:
-            print(f"Error starting now playing updates for guild {guild_id}: {e}")
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error starting now playing updates for guild {guild_id}: {e}")
     
     async def stop_now_playing_updates(self, guild_id: int):
         """Stop automatic progress updates for a guild"""
@@ -649,39 +696,35 @@ class Music(commands.Cog):
             # Task was cancelled, which is normal
             pass
         except Exception as e:
-            print(f"Error in now playing update loop for guild {guild_id}: {e}")
+            logger = logging.getLogger(__name__)
+            logger.error(f"Error in now playing update loop for guild {guild_id}: {e}")
 
     @app_commands.command(name="setup", description="Set up the bot's control panel in this server")
     async def setup(self, interaction: discord.Interaction):
         """Set up the bot's control panel - Admin only"""
         try:
+            from utils.embeds import error, info, success
+            
             # Check if user has Administrator permissions
             if not interaction.user.guild_permissions.administrator:
-                embed = discord.Embed(
-                    title=MESSAGES['ERROR_TITLE'],
-                    description="You need Administrator permissions to use this command.",
-                    color=COLORS['ERROR']
+                await interaction.response.send_message(
+                    embed=error("You do not have the required permissions to use this command."),
+                    ephemeral=True
                 )
-                await interaction.response.send_message(embed=embed, ephemeral=True)
                 return
             
             await interaction.response.defer(ephemeral=True)
             
-            # Check if guild is already set up
-            from utils.database import guild_exists
-            if await guild_exists(interaction.guild.id):
-                embed = discord.Embed(
-                    description="This server is already set up! The control panel is active.",
-                    color=COLORS['WARNING']
-                )
-                await interaction.followup.send(embed=embed, ephemeral=True)
-                return
+            # Allow re-setup - this will override existing configuration
             
             # Send a DM to the interaction.user asking for channel name as specified
             try:
                 # First, create the setup session in database for persistence across restarts
                 from utils.database import get_database_manager
                 db_manager = await get_database_manager()
+                
+                # Delete any existing setup session for this user to allow re-setup
+                await db_manager.delete_setup_session(interaction.user.id)
                 
                 started_at = discord.utils.utcnow().isoformat()
                 session_created = await db_manager.create_setup_session(
@@ -704,57 +747,51 @@ class Music(commands.Cog):
                     return
                 
                 # Now send the DM
-                dm_embed = discord.Embed(
+                # Use standardized info embed for setup instructions
+                from utils.embeds import create_info_embed
+                dm_embed = create_info_embed(
                     title="🎵 Music Bot Setup",
                     description=f"Hi {interaction.user.mention}! Let's set up the music control panel for **{interaction.guild.name}**.\n\n"
                                "Please reply with the name of the text channel you want to use for the music controls.\n\n"
                                "**Example:** `#music-controls`\n\n"
                                "⚠️ Make sure the channel name starts with `#` and that the channel exists in your server.",
-                    color=COLORS['INFO']
+                    footer="You have 5 minutes to respond."
                 )
-                dm_embed.set_footer(text="You have 5 minutes to respond.")
                 
                 await interaction.user.send(embed=dm_embed)
                 logger.info(f"Setup DM sent successfully to user {interaction.user.id}")
                 
                 # Confirm DM was sent
-                success_embed = discord.Embed(
-                    description="📨 I've sent you a DM with setup instructions. Please check your direct messages!",
-                    color=COLORS['SUCCESS']
+                await interaction.followup.send(
+                    embed=success("Setup instructions sent to your DMs."),
+                    ephemeral=True
                 )
-                await interaction.followup.send(embed=success_embed, ephemeral=True)
                 
             except discord.Forbidden:
                 # User has DMs disabled - clean up the session
                 await db_manager.delete_setup_session(interaction.user.id)
                 logger.warning(f"Failed to send setup DM to user {interaction.user.id} - DMs disabled")
                 
-                error_embed = discord.Embed(
-                    title="❌ Setup Failed",
-                    description="I couldn't send you a DM. Please enable DMs from server members and try again.",
-                    color=COLORS['ERROR']
+                await interaction.followup.send(
+                    embed=error("Cannot send DM. Please enable direct messages and try again."),
+                    ephemeral=True
                 )
-                await interaction.followup.send(embed=error_embed, ephemeral=True)
             
             except Exception as e:
                 # Any other error - clean up the session
                 await db_manager.delete_setup_session(interaction.user.id)
                 logger.error(f"Setup failed for user {interaction.user.id}: {e}")
                 
-                error_embed = discord.Embed(
-                    title="❌ Setup Failed", 
-                    description=f"An error occurred during setup: {str(e)}",
-                    color=COLORS['ERROR']
+                await interaction.followup.send(
+                    embed=error(f"Setup failed: {str(e)}"),
+                    ephemeral=True
                 )
-                await interaction.followup.send(embed=error_embed, ephemeral=True)
             
         except Exception as e:
-            embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=str(e),
-                color=COLORS['ERROR']
+            await interaction.followup.send(
+                embed=error(f"An error occurred during setup: {str(e)}"),
+                ephemeral=True
             )
-            await interaction.followup.send(embed=embed, ephemeral=True)
 
     # Additional slash commands for common functionality
 
@@ -762,7 +799,7 @@ class Music(commands.Cog):
     async def queue(self, interaction: discord.Interaction):
         """Show the current music queue"""
         try:
-            await interaction.response.defer()
+            from utils.embeds import info, error
             
             result = await self.bot.ipc_manager.ipc_client.get_player_state(interaction.guild.id)
             
@@ -802,19 +839,17 @@ class Music(commands.Cog):
                         embed.set_footer(text=MESSAGES['REMAINING_SONGS'].format(remaining))
                 else:
                     if not current_song:
-                        embed.description = MESSAGES['QUEUE_EMPTY_SAD']
+                        embed.description = "The queue is currently empty."
                 
-                await interaction.followup.send(embed=embed)
+                await interaction.response.send_message(embed=embed, ephemeral=True)
             else:
                 raise ValueError(result.get('message', 'Unknown error'))
                 
         except Exception as e:
-            embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=str(e),
-                color=COLORS['ERROR']
+            await interaction.response.send_message(
+                embed=error(f"Failed to get queue: {str(e)}"),
+                ephemeral=True
             )
-            await interaction.followup.send(embed=embed, ephemeral=True)
 
     # Support command (non-music functionality)
     @app_commands.command(name="support", description="Send a support message to the bot owner")
@@ -822,16 +857,16 @@ class Music(commands.Cog):
     async def support(self, interaction: discord.Interaction, message: str):
         """Send a support message to the bot owner"""
         try:
+            from utils.embeds import success, error
+            
             # Get the effective owner (configured owner or guild owner)
             owner = await self.bot.get_effective_owner_async(interaction.guild)
             
             if not owner:
-                error_embed = discord.Embed(
-                    title=MESSAGES['ERROR_TITLE'],
-                    description="No bot owner configured for support messages.",
-                    color=COLORS['ERROR']
+                await interaction.response.send_message(
+                    embed=error("No bot owner configured for support messages."),
+                    ephemeral=True
                 )
-                await interaction.response.send_message(embed=error_embed, ephemeral=True)
                 return
             
             embed = discord.Embed(
@@ -852,26 +887,21 @@ class Music(commands.Cog):
             
             await owner.send(embed=embed)
             
-            success_embed = discord.Embed(
-                description=MESSAGES['SUPPORT_SENT'],
-                color=COLORS['SUCCESS']
+            await interaction.response.send_message(
+                embed=success("Your support message has been sent to the bot owner."),
+                ephemeral=True
             )
-            await interaction.response.send_message(embed=success_embed, ephemeral=True)
             
         except discord.Forbidden:
-            error_embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=MESSAGES['DM_ERROR'],
-                color=COLORS['ERROR']
+            await interaction.response.send_message(
+                embed=error("Cannot send support message. The bot owner has disabled DMs."),
+                ephemeral=True
             )
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
         except Exception as e:
-            error_embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=MESSAGES['SUPPORT_ERROR'],
-                color=COLORS['ERROR']
+            await interaction.response.send_message(
+                embed=error("Failed to send support message. Please try again later."),
+                ephemeral=True
             )
-            await interaction.response.send_message(embed=error_embed, ephemeral=True)
 
     @commands.Cog.listener()
     async def on_message(self, message):
@@ -898,14 +928,14 @@ class Music(commands.Cog):
             
             # Send a helpful message if they seem to be trying to respond to setup
             if message.content.strip().startswith('#'):
-                recovery_embed = discord.Embed(
-                    title="❓ Setup Session Not Found",
+                from utils.embeds import create_warning_embed
+                recovery_embed = create_warning_embed(
+                    title="Setup Session Not Found",
                     description="I don't have an active setup session for you. This could mean:\n\n"
                                "• The setup session expired (sessions last 5 minutes)\n"
                                "• The bot was restarted recently\n"
                                "• You already completed the setup\n\n"
-                               "**To start a new setup, run `/setup` in your server.**",
-                    color=COLORS['WARNING']
+                               "**To start a new setup, run `/setup` in your server.**"
                 )
                 await message.channel.send(embed=recovery_embed)
             return
@@ -918,10 +948,10 @@ class Music(commands.Cog):
         if time_elapsed.total_seconds() > 300:  # 5 minutes
             await db_manager.delete_setup_session(message.author.id)
             
-            timeout_embed = discord.Embed(
-                title="⏰ Setup Timeout",
-                description="The setup session has expired. Please run `/setup` again in your server.",
-                color=COLORS['ERROR']
+            from utils.embeds import create_warning_embed
+            timeout_embed = create_warning_embed(
+                title="Setup Timeout",
+                description="The setup session has expired. Please run `/setup` again in your server."
             )
             await message.channel.send(embed=timeout_embed)
             return
@@ -930,10 +960,10 @@ class Music(commands.Cog):
         channel_input = message.content.strip()
         
         if not channel_input.startswith('#'):
-            error_embed = discord.Embed(
-                title="❌ Invalid Channel Name",
-                description="Please provide a channel name that starts with `#`.\n\n**Example:** `#music-controls`",
-                color=COLORS['ERROR']
+            from utils.embeds import create_error_embed
+            error_embed = create_error_embed(
+                title="Invalid Channel Name",
+                description="Please provide a channel name that starts with `#`.\n\n**Example:** `#music-controls`"
             )
             await message.channel.send(embed=error_embed)
             return
@@ -944,10 +974,10 @@ class Music(commands.Cog):
         # Get the guild and find the channel
         guild = self.bot.get_guild(session['guild_id'])
         if not guild:
-            error_embed = discord.Embed(
-                title="❌ Server Not Found",
-                description="I couldn't find the server. Please run `/setup` again.",
-                color=COLORS['ERROR']
+            from utils.embeds import create_error_embed
+            error_embed = create_error_embed(
+                title="Server Not Found",
+                description="I couldn't find the server. Please run `/setup` again."
             )
             await message.channel.send(embed=error_embed)
             await db_manager.delete_setup_session(message.author.id)
@@ -957,25 +987,25 @@ class Music(commands.Cog):
         channel = discord.utils.get(guild.text_channels, name=channel_name)
         
         if not channel:
-            error_embed = discord.Embed(
-                title="❌ Channel Not Found",
+            from utils.embeds import create_error_embed
+            error_embed = create_error_embed(
+                title="Channel Not Found",
                 description=f"I couldn't find a text channel named `#{channel_name}` in **{session['guild_name']}**.\n\n"
                            "Please make sure:\n"
                            "• The channel exists\n"
                            "• You spelled the name correctly\n"
                            "• It's a text channel (not voice)\n\n"
-                           "Try again with a valid channel name.",
-                color=COLORS['ERROR']
+                           "Try again with a valid channel name."
             )
             await message.channel.send(embed=error_embed)
             return
         
         # Check if it's a text channel
         if not isinstance(channel, discord.TextChannel):
-            error_embed = discord.Embed(
-                title="❌ Invalid Channel Type",
-                description=f"`#{channel_name}` is not a text channel. Please provide a text channel name.",
-                color=COLORS['ERROR']
+            from utils.embeds import create_error_embed
+            error_embed = create_error_embed(
+                title="Invalid Channel Type",
+                description=f"`#{channel_name}` is not a text channel. Please provide a text channel name."
             )
             await message.channel.send(embed=error_embed)
             return
@@ -989,6 +1019,29 @@ class Music(commands.Cog):
     async def _create_control_panel(self, user: discord.User, guild: discord.Guild, channel: discord.TextChannel):
         """Create the control panel with Queue and Now Playing embeds"""
         try:
+            # Check for existing setup and clean up old control panel messages
+            from utils.database import get_guild_setup
+            existing_setup = await get_guild_setup(guild.id)
+            
+            if existing_setup:
+                # Try to delete old control panel messages
+                old_guild = self.bot.get_guild(guild.id)
+                if old_guild:
+                    old_channel = old_guild.get_channel(existing_setup.control_channel_id)
+                    if old_channel:
+                        try:
+                            # Delete old queue message
+                            old_queue_message = await old_channel.fetch_message(existing_setup.queue_message_id)
+                            await old_queue_message.delete()
+                        except:
+                            pass  # Message might already be deleted
+                        
+                        try:
+                            # Delete old now playing message
+                            old_now_playing_message = await old_channel.fetch_message(existing_setup.now_playing_message_id)
+                            await old_now_playing_message.delete()
+                        except:
+                            pass  # Message might already be deleted
             # 1. Create the Queue Embed (initially empty) as specified
             # Use the new QueueView for interactive pagination
             empty_queue_view = QueueView([], current_page=1, bot=self.bot, guild_id=guild.id)
@@ -1008,11 +1061,11 @@ class Music(commands.Cog):
                 await now_playing_message.pin()
             except discord.Forbidden:
                 # Bot doesn't have permission to pin messages
-                error_embed = discord.Embed(
-                    title="⚠️ Setup Warning",
+                from utils.embeds import create_warning_embed
+                error_embed = create_warning_embed(
+                    title="Setup Warning",
                     description=f"Control panel created in {channel.mention}, but I couldn't pin the messages. "
-                               "Please give me 'Manage Messages' permission to pin the control panel.",
-                    color=COLORS['WARNING']
+                               "Please give me 'Manage Messages' permission to pin the control panel."
                 )
                 await user.send(embed=error_embed)
             
@@ -1029,36 +1082,27 @@ class Music(commands.Cog):
             
             if success:
                 # 5. DM the user a success message as specified
-                success_embed = discord.Embed(
-                    title="✅ Setup Complete!",
-                    description=f"The music control panel has been successfully set up in {channel.mention} "
+                from utils.embeds import create_success_embed
+                setup_type = "reconfigured" if existing_setup else "set up"
+                success_embed = create_success_embed(
+                    title="Setup Complete!",
+                    description=f"The music control panel has been successfully {setup_type} in {channel.mention} "
                                f"on **{guild.name}**.\n\n"
                                "The control panel will automatically update when songs are played, skipped, or queued.\n\n"
                                "**Features:**\n"
                                "🎵 **Queue Display** - Shows upcoming songs\n"
                                "🎶 **Now Playing** - Shows current song with progress\n"
                                "🔄 **Auto-Updates** - Real-time status updates",
-                    color=COLORS['SUCCESS']
+                    footer="Control panel is ready to use!"
                 )
-                success_embed.set_footer(text="Control panel is ready to use!")
                 await user.send(embed=success_embed)
-                
-                # Also send a message in the control channel
-                welcome_embed = discord.Embed(
-                    title="🎵 Music Control Panel",
-                    description="This is your music control panel! The embeds above will automatically update "
-                               "with queue and playback information.\n\n"
-                               f"Set up by {user.mention}",
-                    color=COLORS['INFO']
-                )
-                await channel.send(embed=welcome_embed)
                 
             else:
                 # Database error
-                error_embed = discord.Embed(
-                    title="❌ Setup Failed",
-                    description="There was an error saving the setup to the database. Please try again.",
-                    color=COLORS['ERROR']
+                from utils.embeds import create_error_embed
+                error_embed = create_error_embed(
+                    title="Setup Failed",
+                    description="There was an error saving the setup to the database. Please try again."
                 )
                 await user.send(embed=error_embed)
                 
@@ -1071,20 +1115,20 @@ class Music(commands.Cog):
                     
         except discord.Forbidden:
             # Bot doesn't have permission to send messages in the channel
-            error_embed = discord.Embed(
-                title="❌ Setup Failed",
+            from utils.embeds import create_error_embed
+            error_embed = create_error_embed(
+                title="Setup Failed",
                 description=f"I don't have permission to send messages in {channel.mention}. "
-                           "Please give me 'Send Messages' permission in that channel and try again.",
-                color=COLORS['ERROR']
+                           "Please give me 'Send Messages' permission in that channel and try again."
             )
             await user.send(embed=error_embed)
             
         except Exception as e:
             # General error
-            error_embed = discord.Embed(
-                title="❌ Setup Failed",
-                description=f"An unexpected error occurred: {str(e)}\n\nPlease try again or contact support.",
-                color=COLORS['ERROR']
+            from utils.embeds import create_error_embed
+            error_embed = create_error_embed(
+                title="Setup Failed",
+                description=f"An unexpected error occurred: {str(e)}\n\nPlease try again or contact support."
             )
             await user.send(embed=error_embed)
 
@@ -1095,12 +1139,12 @@ class Music(commands.Cog):
             error = error.original
         
         if isinstance(error, ValueError):
-            embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=str(error),
-                color=COLORS['ERROR']
+            from utils.embeds import create_error_embed
+            embed = create_error_embed(
+                description=str(error)
             )
             await ctx.send(embed=embed, delete_after=10)
+
 
 
 async def setup(bot):

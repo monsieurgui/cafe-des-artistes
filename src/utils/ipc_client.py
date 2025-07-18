@@ -17,7 +17,7 @@ from utils.ipc_protocol import (
     Command, Event, CommandMessage, EventMessage, IPCMessage,
     BOT_CLIENT_CONFIG, create_connect_command, create_disconnect_command,
     create_add_to_queue_command, create_skip_command, create_get_state_command,
-    create_reset_command, create_remove_from_queue_command
+    create_reset_command, create_remove_from_queue_command, create_play_next_command
 )
 
 
@@ -258,6 +258,11 @@ class IPCClient:
         """Send REMOVE_FROM_QUEUE command to Player Service"""
         command = create_remove_from_queue_command(guild_id, song_index)
         return await self._send_command(command)
+    
+    async def play_next(self, guild_id: int) -> Dict[str, Any]:
+        """Send PLAY_NEXT command to Player Service"""
+        command = create_play_next_command(guild_id)
+        return await self._send_command(command)
 
 
 class IPCManager:
@@ -371,12 +376,19 @@ class IPCManager:
             return
         
         try:
+            # Stop any currently playing audio first
+            if guild.voice_client.is_playing():
+                guild.voice_client.stop()
+                self.logger.info(f"Stopped current audio in guild {guild_id}")
+                # Wait a bit for the stop to take effect
+                await asyncio.sleep(0.1)
+            
             # Bot client streams the audio provided by player service
             from discord import FFmpegPCMAudio
-            ffmpeg_options = {
-                'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin',
-                'options': '-vn'
-            }
+            from utils.constants import FFMPEG_OPTIONS
+            
+            # Use consistent ffmpeg options for better termination handling
+            ffmpeg_options = FFMPEG_OPTIONS.copy()
             
             audio_source = FFmpegPCMAudio(audio_url, **ffmpeg_options)
             
@@ -385,6 +397,16 @@ class IPCManager:
                     self.logger.error(f"Audio playback error in guild {guild_id}: {error}")
                 else:
                     self.logger.info(f"Audio finished playing in guild {guild_id}")
+                    # When audio finishes naturally, tell player service to play next
+                    # Use the bot's event loop to schedule the coroutine
+                    try:
+                        bot_loop = self.bot.loop
+                        if bot_loop and not bot_loop.is_closed():
+                            asyncio.run_coroutine_threadsafe(self._handle_audio_finished(guild_id), bot_loop)
+                        else:
+                            self.logger.warning(f"Bot event loop not available for guild {guild_id}")
+                    except Exception as e:
+                        self.logger.error(f"Error scheduling audio finished handler: {e}")
             
             # Start streaming audio to Discord
             guild.voice_client.play(audio_source, after=after_playing)
@@ -450,3 +472,11 @@ class IPCManager:
         """Handle STATE_UPDATE event"""
         self.logger.debug(f"State update for guild {guild_id}")
         # TODO: Update all embeds based on full state
+    
+    async def _handle_audio_finished(self, guild_id: int):
+        """Handle when audio finishes naturally - tell player service to play next"""
+        try:
+            # Tell player service to play next song (without skip logic)
+            await self.ipc_client.play_next(guild_id)
+        except Exception as e:
+            self.logger.error(f"Error handling audio finished for guild {guild_id}: {e}")
