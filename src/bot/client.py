@@ -33,7 +33,8 @@ class MusicBot(commands.Bot):
         
         # Configure Discord intents
         intents = discord.Intents.default()
-        intents.message_content = True
+        intents.message_content = True  # MESSAGE CONTENT INTENT
+        intents.members = True          # SERVER MEMBERS INTENT  
         intents.voice_states = True
         
         # Initialize the bot with configuration
