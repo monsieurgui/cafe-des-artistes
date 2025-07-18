@@ -1,20 +1,58 @@
-version: '3.8'
-
 services:
-  music_bot:
-    build: .
-    container_name: cafe-des-artistes
+  # Bot Client Service - Lightweight Discord interface
+  bot-client:
+    build:
+      context: .
+      dockerfile: bot-client.Dockerfile
+    container_name: cafe-bot-client
     restart: unless-stopped
-    volumes:
-      - ./src/config/config.yaml:/app/src/config/config.yaml:ro  
-      - ./logs:/app/logs
+    env_file:
+      - .env
     environment:
-      - TZ=America/Montreal  # Set your timezone
-    labels:
-      - "traefik.enable=false"  # Keep as false if Traefik should ignore this service
+      - TZ=America/Montreal
+      - PLAYER_SERVICE_HOST=player-service
+      - PLAYER_SERVICE_COMMAND_PORT=5555
+      - PLAYER_SERVICE_EVENT_PORT=5556
+    volumes:
+      - ./src/config/config.yaml:/app/src/config/config.yaml:ro
+      - ./logs:/app/logs
+      - bot-data:/app/data
     networks:
-      - traefik-network  # Connect to the shared Traefik network
+      - cafebot-net
+    depends_on:
+      - player-service
+    labels:
+      - "traefik.enable=false"
+
+  # Player Service - Headless audio processing
+  player-service:
+    build:
+      context: .
+      dockerfile: player-service.Dockerfile
+    container_name: cafe-player-service
+    restart: unless-stopped
+    environment:
+      - TZ=America/Montreal
+      - COMMAND_PORT=5555
+      - EVENT_PORT=5556
+      - BIND_HOST=0.0.0.0
+    volumes:
+      - ./src/config/config.yaml:/app/src/config/config.yaml:ro
+      - ./logs:/app/logs
+    networks:
+      - cafebot-net
+    ports:
+      - "5555:5555"  # Command port (for debugging)
+      - "5556:5556"  # Event port (for debugging)
+    labels:
+      - "traefik.enable=false"
 
 networks:
-  traefik-network:
-    external: true  # Indicates that this network is managed outside this Compose file
+  cafebot-net:
+    driver: bridge
+    name: cafebot-network
+
+volumes:
+  bot-data:
+    driver: local
+    name: cafe-bot-data

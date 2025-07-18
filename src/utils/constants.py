@@ -76,8 +76,8 @@ YTDL_OPTIONS_LIVE = {
 
 # Configuration FFMPEG
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin -analyzeduration 0 -loglevel error -thread_queue_size 512',
-    'options': '-vn -f s16le -acodec pcm_s16le -flags low_delay -threads 1 -bufsize 4096k'
+    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -nostdin -thread_queue_size 1024 -probesize 32 -analyzeduration 0 -fflags nobuffer -flags low_delay -rtbufsize 15M -loglevel error',
+    'options': '-vn -f s16le -acodec pcm_s16le -ar 48000 -ac 2 -aq 8 -bufsize 512k -flush_packets 1 -avoid_negative_ts disabled'
 }
 
 # Couleurs des Embeds Discord
@@ -136,3 +136,6 @@ LELIM_PLAYLIST_URL = "https://www.youtube.com/playlist?list=PLjJXgtuafBUV2FsqKE5
 
 # Chemin du dossier de cache pour les chansons Lelim
 LELIM_CACHE_DIR = "cache/lelim"
+
+# Placeholder thumbnail for Now Playing embed
+PLACEHOLDER_THUMBNAIL_URL = "https://cdn.discordapp.com/embed/avatars/0.png"

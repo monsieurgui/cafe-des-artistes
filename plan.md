@@ -1,0 +1,1 @@
+The goal will be to export all strings, all constants and put them in a constants.py file, it will be done to make customization better for the user.

@@ -88,33 +88,55 @@ def load_config() -> dict:
     )
     logger = logging.getLogger(__name__)
     
-    # Load .env file if it exists
-    env_path = os.path.join(os.path.dirname(__file__), '..', '.env')
-    if os.path.exists(env_path):
-        logger.debug(f"Loading .env file from: {env_path}")
-        load_dotenv(env_path)
+    # Load .env file if it exists (check both src/.env and project root/.env)
+    env_paths = [
+        os.path.join(os.path.dirname(__file__), '..', '.env'),  # src/.env
+        os.path.join(os.path.dirname(__file__), '..', '..', '.env')  # project root/.env
+    ]
+    
+    for env_path in env_paths:
+        if os.path.exists(env_path):
+            logger.debug(f"Loading .env file from: {env_path}")
+            load_dotenv(env_path)
+            break
     
     # Determine if we're in development mode
     is_dev = os.getenv('BOT_ENV', '').lower() == 'development'
     logger.info(f"Running in {'development' if is_dev else 'production'} mode")
     
     # Default configuration that applies to both dev and prod
+    def safe_int(value, default=None):
+        """Safely convert a value to int, returning default if not possible"""
+        if not value or value in ['your_discord_user_id_here', 'your_user_id_here']:
+            return default
+        try:
+            return int(value)
+        except (ValueError, TypeError):
+            return default
+    
     default_config = {
         'command_prefix': os.getenv('BOT_PREFIX', '!'),
         'ffmpeg_path': get_ffmpeg_path(),
-        'owner_id': int(os.getenv('OWNER_ID', 0)),
+        'owner_id': safe_int(os.getenv('OWNER_ID')),
         'log_level': os.getenv('LOG_LEVEL', 'INFO'),
-        'max_queue_size': int(os.getenv('MAX_QUEUE_SIZE', 1000)),
-        'timeout_duration': int(os.getenv('TIMEOUT_DURATION', 1800)),
+        'max_queue_size': safe_int(os.getenv('MAX_QUEUE_SIZE'), 1000),
+        'timeout_duration': safe_int(os.getenv('TIMEOUT_DURATION'), 1800),
         'debug': os.getenv('DEBUG', 'false').lower() == 'true'
     }
     
     config = {}
     
+    def get_bot_token():
+        """Get bot token from environment variables, checking multiple names"""
+        token = os.getenv('DISCORD_TOKEN') or os.getenv('BOT_TOKEN')
+        if token and token not in ['your_discord_bot_token_here', 'your_bot_token_here']:
+            return token
+        return None
+
     if is_dev:
         # Load configuration from environment variables
         config = default_config.copy()
-        config['bot_token'] = os.getenv('DISCORD_TOKEN')
+        config['bot_token'] = get_bot_token()
     else:
         # Load configuration from yaml in production
         try:
@@ -127,12 +149,12 @@ def load_config() -> dict:
             else:
                 # If no yaml file exists, use environment variables with defaults
                 config = default_config.copy()
-                config['bot_token'] = os.getenv('DISCORD_TOKEN')
+                config['bot_token'] = get_bot_token()
         except Exception as e:
             logger.error(f"Error loading config.yaml: {e}")
             # Fallback to environment variables with defaults
             config = default_config.copy()
-            config['bot_token'] = os.getenv('DISCORD_TOKEN')
+            config['bot_token'] = get_bot_token()
     
     # Validate required configuration
     if not config.get('bot_token'):

@@ -7,7 +7,7 @@ class NowPlayingDisplay:
     def __init__(self, ctx, song_info):
         self.ctx = ctx
         self.song_info = song_info
-        self.start_time = datetime.utcnow()
+        self.start_time = discord.utils.utcnow()
         self.message = None
         self.update_task = None
         
@@ -42,7 +42,7 @@ class NowPlayingDisplay:
         
         # Duration and progress
         duration = self.song_info.get('duration', 0)
-        current_time = (datetime.utcnow() - self.start_time).total_seconds()
+        current_time = (discord.utils.utcnow() - self.start_time).total_seconds()
         
         if duration:
             progress = (

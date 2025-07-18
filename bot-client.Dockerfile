@@ -1,8 +1,8 @@
 FROM python:3.11-slim
 
-# Install system dependencies
+# Install system dependencies including FFmpeg for audio streaming and fonts for image generation
 RUN apt-get update && \
-    apt-get install -y ffmpeg git && \
+    apt-get install -y git ffmpeg fonts-dejavu-core fonts-dejavu-extra && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 
@@ -22,5 +22,10 @@ COPY src/ ./src/
 # Set Python path
 ENV PYTHONPATH=/app
 
-# Run the bot
+# Set environment variables for IPC
+ENV PLAYER_SERVICE_HOST=player-service
+ENV PLAYER_SERVICE_COMMAND_PORT=5555
+ENV PLAYER_SERVICE_EVENT_PORT=5556
+
+# Run the bot client
 CMD ["python", "src/main.py"]
