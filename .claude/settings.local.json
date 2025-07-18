@@ -1,0 +1,13 @@
+{
+  "permissions": {
+    "allow": [
+      "Bash(wc:*)",
+      "Bash(cat:*)",
+      "Bash(python test_ipc_communication.py:*)",
+      "Bash(pip install:*)",
+      "Bash(docker-compose:*)",
+      "Bash(rmdir:*)"
+    ],
+    "deny": []
+  }
+}

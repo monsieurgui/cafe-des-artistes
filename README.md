@@ -23,10 +23,10 @@ A feature-rich Discord music bot with high-quality playback and performance opti
    ```
 
 3. Set up environment:
-   - Copy `src/.env.example` to `src/.env`
-   - Edit `src/.env` and add your Discord token and FFmpeg path
+   - Copy `.env.example` to `.env`
+   - Edit `.env` and add your Discord token and other configuration
    ```bash
-   cp src/.env.example src/.env
+   cp .env.example .env
    ```
 
 4. Run in development mode:
@@ -37,8 +37,8 @@ A feature-rich Discord music bot with high-quality playback and performance opti
 
 1. Configure environment:
    ```bash
-   cp src/.env.example src/.env
-   # Edit src/.env with your production settings
+   cp .env.example .env
+   # Edit .env with your production settings
    ```
 
 2. Run with Docker Compose:
@@ -67,11 +67,31 @@ A feature-rich Discord music bot with high-quality playback and performance opti
 - Development: Uses local Python environment with hot-reloading
 - Production: Uses Docker with optimized settings
 
+## Configuration
+
+The bot uses environment variables for configuration. Create a `.env` file in the project root with the following variables:
+
+### Required Variables
+- `DISCORD_TOKEN`: Your Discord bot token from the Discord Developer Portal
+- `BOT_ENV`: Set to `development` for local development or `production` for Docker
+
+### Optional Variables
+- `BOT_PREFIX`: Command prefix (default: `!`)
+- `OWNER_ID`: Your Discord user ID for bot management (if not set, uses guild owners automatically)
+- `LOG_LEVEL`: Logging level (default: `INFO`)
+- `DEBUG`: Enable debug mode (default: `false`)
+- `MAX_QUEUE_SIZE`: Maximum songs in queue (default: `1000`)
+- `TIMEOUT_DURATION`: Idle timeout in seconds (default: `1800`)
+- `FFMPEG_PATH`: Path to FFmpeg executable (auto-detected if not specified)
+
+See `.env.example` for a complete configuration template.
+
 ## Troubleshooting
-- Ensure FFmpeg is properly installed and path is set in .env
-- Check Discord token permissions
-- Verify Python version compatibility
+- Ensure FFmpeg is properly installed and accessible in PATH
+- Check Discord token permissions in the Developer Portal
+- Verify Python version compatibility (3.8+)
 - For development issues, check the virtual environment
+- Make sure `.env` file is in the project root directory
 
 ## Contributing
 Feel free to submit issues and pull requests!

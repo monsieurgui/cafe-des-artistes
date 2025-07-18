@@ -1,259 +1,436 @@
-# Bot Troubleshooting: YouTube 403 Forbidden Error (July 2, 2025)
+# Project Progress Memory
 
-## Issue:
-- HTTP 403 Forbidden errors when accessing YouTube videos
-- ffmpeg unable to access HLS playlist segments
-- Error: "Invalid data found when processing input"
-- Started happening today (July 2, 2025)
+## Memory of the Last Sprint
 
-## Root Cause:
-- YouTube has been implementing changes to their API and access methods
-- The bot was using an outdated yt-dlp version (2025.06.09)
-- YouTube is gradually enforcing restrictions on certain clients (especially the 'tv' client)
-
-## Fixes Applied:
-- [x] **Updated yt-dlp** from `2025.06.09` to `2025.06.30` (latest stable version)
-- [x] **Enhanced yt-dlp configuration** in `src/utils/constants.py`:
-  - Added `extractor_args` to use 'android' and 'web' clients instead of 'tv'
-  - Added options to skip HLS/DASH manifests that were causing 403 errors
-  - Added proper user agent and referer headers
-  - Increased HTTP chunk size for better streaming
-- [x] **Updated FFmpeg options** for better streaming stability:
-  - Reduced thread queue size from 4096 to 512
-  - Added buffer size parameter
-  - Improved thread handling
-- [x] **Updated discord.py** from custom fix branch to official v2.5.2+:
-  - The DA-344/d.py fix/voice-issues branch was removed (likely merged)
-  - Switched to official discord.py release which should include the voice fixes
-
-## Testing Required:
-- [ ] User to test bot with YouTube videos
-- [ ] Monitor for any remaining 403 errors
-- [ ] Check if audio quality and streaming stability are maintained
+This document summarizes the progress and accomplishments from the most recent sprint for the Café des Artistes Discord music bot project.
 
 ---
 
-# Bot Troubleshooting: "SONG_UNAVAILABLE" Error
+### Architectural Refactoring & Decoupling
 
-## Tasks:
+**Standalone Player Service:**
+- Developed a comprehensive IPC protocol using ZeroMQ for low-latency, real-time communication between services. The protocol uses JSON messages for commands (CONNECT, DISCONNECT, ADD_TO_QUEUE, SKIP_SONG, GET_STATE, RESET_PLAYER, REMOVE_FROM_QUEUE) and events (SONG_STARTED, SONG_ENDED, QUEUE_UPDATED, PLAYER_IDLE, PLAYER_ERROR, STATE_UPDATE).
+- Created `src/utils/ipc_protocol.py` for protocol definitions and helpers.
+- Built the Player Service application entry point (`player_main.py`) with a main class, ZeroMQ initialization, command processing loop, graceful shutdown, and support for multiple MusicPlayerService instances (one per guild) using asyncio.
+- Refactored the MusicPlayer core into `src/core/music_player_service.py`, removing all direct Discord API dependencies. The new core works with `guild_id`, accepts voice connection parameters, and maintains queue management and playback.
+- Implemented a command handler in the Player Service to process all defined commands, manage player instances, and return structured JSON responses with robust error handling.
+- Added event broadcasting to the MusicPlayerService, sending events to the Bot Client via ZeroMQ PUB socket. Events include full song data and player state, and are sent automatically on state changes.
 
-- [x] **Fix "403 Forbidden" error**: The `yt-dlp` version was outdated, causing HTTP 403 errors when fetching from YouTube. Updated from a non-existent version to `2024.03.10` in `src/requirements.txt`.
-- [x] Check `yt-dlp` version and update if necessary.
-  - Current version: `2025.3.31`
-  - Latest version: `2025.04.30`
-  - Updated `yt-dlp` to `2025.04.30`.
-- [x] Get `yt-dlp` documentation (Implicitly covered by web search and knowledge).
-- [x] Check installed `yt-dlp` version (`2025.4.30`) against latest (`2025.04.30`) - no update needed for this session.
-- [ ] Resolve git push secret scanning error (Discord Bot Token in `src/config/config.yaml`).
-  - [ ] Ensure secret is removed from the working directory version of `src/config/config.yaml`.
-  - [x] Add `src/config/config.yaml` to `.gitignore`. (Completed)
-  - [ ] Amend the problematic commit (`d354fddcc75f2188f77b7151805e18e52713d253`) to remove the secret from history.
-  - [ ] Advise on best practices for secret management. (Partially done)
-- [ ] Investigate "Requested format is not available" error.
-  - Locate code responsible for `yt-dlp` format selection.
-  - Analyze `yt-dlp` options used by the bot.
-  - Potentially use `yt-dlp --list-formats` to debug.
-- [ ] Resolve the song unavailability issue.
-- [ ] Investigate "Already connected to a voice channel" error.
-  - [x] Identify command triggering the error: `!p`, `!p5`, `!p10`.
-  - [ ] Get full traceback if available. (User described behavior, direct traceback not yet provided)
-  - [IN PROGRESS] Analyze voice state management in `music.py` and `music_player.py`.
-    - `music.py`'s `play`, `p5`, `p10` commands call `player.add_to_queue()` or `player.add_multiple_to_queue()` from `music_player.py`.
-    - The error likely originates from `discord.py`'s voice client management or how `music_player.py` handles joining/connection state during these methods.
-    - **TODO**: Examine `add_to_queue` and `add_multiple_to_queue` in `src/core/music_player.py`.
-    - **IN PROGRESS**: Analyze `play_next` in `src/core/music_player.py` for unreliability.
-        - Hypothesis: Failures in song processing (metadata, FFmpeg) in `play_next` lead to silent halts.
-        - Recursive calls `await self.play_next()` within error handlers are ineffective due to `_playing_lock`.
-        - **PLAN**: Modify error handling in `play_next` (for `info is None` and general `except Exception`) to schedule `self.play_next()` via `self.bot.loop.create_task()` instead of direct await, ensuring `self.current` is cleared and the method returns, to allow lock release and proper subsequent execution.
+**Files Created:**
+- `src/utils/ipc_protocol.py`
+- `player_main.py`
+- `src/core/music_player_service.py`
 
-## NEW ISSUE: Voice Connection Loop (Error 4006)
-
-### Problem Description:
-- Bot joins voice channel then immediately leaves, creating an infinite loop
-- Error code 4006: "Session Invalid" - Discord voice session becomes invalid
-- Occurs when using `!p`, `!p5`, `!p10` commands
-- Started happening recently (June 18, 2025)
-
-### Root Causes Identified:
-1. **Session invalidation** - Voice session becomes invalid due to network issues or Discord API changes
-2. **Connection state management** - Improper handling of existing voice clients
-3. **Auto-reconnect loops** - `reconnect=True` parameter causing infinite retry loops
-4. **Race conditions** - Multiple connection attempts happening simultaneously
-
-### Fixes Applied:
-- [x] **Enhanced `ensure_voice_client()` method**:
-  - Added proper cleanup of invalid voice clients before connecting
-  - Disabled auto-reconnect (`reconnect=False`) to prevent loops
-  - Added connection verification after establishment
-  - Implemented exponential backoff retry mechanism (3 attempts)
-  - Reduced connection timeout from 60s to 30s
-  - Added proper error handling for "Already connected" scenarios
-
-- [x] **Improved `on_voice_state_update()` handler**:
-  - Added complete voice state management in `bot/client.py`
-  - Proper handling of bot disconnections and channel moves
-  - Automatic cleanup when bot is alone in voice channel
-
-- [x] **Enhanced `cleanup()` method**:
-  - More robust voice client disconnection
-  - Better task cancellation and resource cleanup
-  - Graceful error handling during cleanup
-
-- [x] **Additional fixes for persistent 4006 errors**:
-  - Added connection state tracking to prevent race conditions
-  - Implemented connection lock to prevent multiple simultaneous connection attempts
-  - Added specific handling for 4006 session invalidation errors
-  - Enhanced error handling with `_handle_voice_connection_error()` method
-  - Added guild voice client checking to reuse existing connections
-  - Reduced connection timeout to 20s and increased stability wait to 2s
-  - Added `on_disconnect()` and `on_resumed()` handlers for gateway events
-  - Added `on_voice_client_error()` handler for voice-specific errors
-
-- [x] **Voice Keepalive Solution** (Based on Discord.py discussion):
-  - Implemented `_voice_keepalive()` method to send silence packets every 30 seconds
-  - Added `_start_voice_keepalive()` and `_stop_voice_keepalive()` methods
-  - Prevents Discord's 15-minute to 2-hour disconnection cycle for load balancing
-  - Automatically starts when voice connection is established
-  - Properly stops when bot disconnects or cleans up
-  - Based on solution from [Discord.py discussion #9722](https://github.com/Rapptz/discord.py/discussions/9722#discussioncomment-8400265)
-
-- [x] **Dependency Updates** (Attempting to fix 4006 handshake errors):
-  - Updated `discord.py` from `>=2.3.2` to `>=2.4.1` (latest stable version)
-  - Added `websockets>=12.0` for better WebSocket connection stability
-  - This addresses potential compatibility issues with Discord's voice gateway
-  - The 4006 error during voice handshake suggests a version compatibility issue
-
-- [x] **Discord.py 4006 Fix** (January 27, 2025):
-  - **Source**: Originally from DA-344/d.py fix/voice-issues branch (now removed/merged)
-  - **Current Solution**: Using py-cord>=2.5.0 (actively maintained fork)
-  - **What it fixes**:
-    - 4006 errors caused by incorrect voice endpoint port handling
-    - Voice protocol v8 support
-    - Buffered resuming for voice connections
-    - Better voice connection stability
-  - **Status**: ✅ Switched to py-cord for better voice support
-  - **Update (July 2, 2025)**: The DA-344 fork has been removed. Switched to py-cord which is an actively maintained fork of discord.py with better voice handling and ongoing development. Py-cord is fully compatible with discord.py code.
-
-- [x] **Advanced Connection Strategies** (For persistent 4006 errors):
-  - Implemented multiple connection strategies with fallback mechanisms
-  - Strategy 1: Standard connection with reduced timeout (15s)
-  - Strategy 2: Alternative connection with muted state
-  - Strategy 3: Reuse existing guild voice client
-  - Added `_handle_4006_error()` method with exponential backoff and jitter
-  - Increased retries to 5 attempts with longer delays
-  - Added random jitter to prevent connection thundering herd
-  - Enhanced error handling with proper connection cleanup between attempts
-
-- [x] **Discord-Side Issue Investigation** (Started June 18, 2025):
-  - **Issue**: 4006 errors started occurring today after 8 months of working fine
-  - **Pattern**: Voice handshake completes but immediately terminates with 4006
-  - **Endpoint**: `c-iad03-67da893d.discord.media` (US East region)
-  - **Hypothesis**: Discord may have updated their voice gateway infrastructure
-  - **Temporary Workarounds**:
-    - Added extended timeout connection strategy (25s timeout)
-    - Added non-deafened connection attempt
-    - Added 5-second gateway reset delay after 4006 errors
-    - Implemented 4 different connection strategies with fallbacks
-  - **Next Steps**: Monitor Discord status and community reports for similar issues
-
-### Testing Status:
-- [ ] User to test the fixes and provide feedback
-- [ ] Monitor for any remaining connection issues
-
-## Completions:
-
-- Successfully updated `pip`.
-- Successfully updated `yt-dlp` from `2025.3.31` to `2025.04.30`.
-- Added `src/config/config.yaml` to `.gitignore`.
-- Fixed voice connection loop issue with error code 4006.
-
-# Bot Optimization Plan
-
-## Phase 1: Prerequisites
-
-1.  **DONE**: Get latest `yt-dlp` documentation.
-2.  **DONE**: Check current `yt-dlp` version in the project and update.
-    *   Current version found: 2025.03.31
-    *   Latest version found: 2025.04.30
-    *   User confirmed `yt-dlp` updated to 2025.04.30.
-3.  **IN PROGRESS**: Analyze bot's current music implementation.
-    *   **DONE**: Identified core music playback file: `src/cogs/music.py` which uses `src/core/music_player.py`.
-    *   **IN PROGRESS**: Reviewing `src/core/music_player.py`.
-        *   Initial findings (lines 1-250):
-            *   Uses `MusicPlayer` class per server.
-            *   Separate thread pools for search (`max_workers=1`) and playback ops (`max_workers=2`).
-            *   Async queue (`processing_queue`) for background song processing.
-            *   Preload queue (`preload_queue`, `maxlen=3`).
-            *   Initial `yt-dlp` search uses minimal options: `extract_flat: True`, `socket_timeout: 1`, `retries: 1`.
-            *   Full metadata processing for `yt-dlp` uses `YTDL_OPTIONS` from `utils.constants.py`.
-            *   Basic URL caching (`_cached_urls`).
-            *   Further findings (lines 251-500):
-                *   `_process_song_metadata` fetches full metadata using `YTDL_OPTIONS` in background.
-                *   `_preload_next` attempts to fetch full info for the immediate next song into `_song_cache`.
-                *   `play_next` is the core playback function. It re-fetches full info with `YTDL_OPTIONS` if not in `_song_cache` (potential bottleneck).
-                *   Uses `FFmpegPCMAudio` with `FFMPEG_OPTIONS` from `utils.constants.py`.
-                *   `after_playing` callback triggers the next song.
-            *   Further findings (lines 501-750):
-                *   `cleanup` method handles resource release (thread pools shutdown with `wait=False`).
-                *   `preload_next_songs` submits `self.download_song` to `thread_pool` for up to 3 songs, storing futures in `self.preload_queue`.
-                *   Details of `download_song` and how `_song_cache` is populated from these futures is still pending.
-                *   Paginated queue display is available.
-                *   Loop logic started; when disabling loop, current loop song is added back to the main queue.
-            *   Further findings (lines 751-1000):
-                *   Looping a song re-fetches info using `self.bot.ytdl.extract_info()` on *every iteration* (inefficient).
-                *   `add_multiple_to_queue` uses `extract_flat: False` and `force_generic_extractor: True` for its `yt-dlp` call, different from `add_to_queue`.
-                *   `_prefetch_song` fetches full song info into `_song_cache` using `self.bot.ytdl.extract_info()`. This seems to be the main method for populating `_song_cache` during preloading.
-                *   The relationship between `_preload_next` (preloading one song) and `preload_next_songs` (filling `preload_queue` with 3 futures) needs full clarity on how `_song_cache` is updated from those futures, and what `download_song` actually does. It's likely `_prefetch_song` is the target of those futures.
-            *   Further findings (lines 1001-end & full review):
-                *   `_prefetch_song` also attempts a `requests.head()` call to the stream URL to "pre-warm" the connection.
-                *   Live streaming uses `self.bot.ytdl.extract_info()` and `FFmpegPCMAudio`.
-                *   A generic `_extract_info()` helper method exists with its own distinct (and somewhat concerning, e.g., `nocheckcertificate`) `yt-dlp` options. Its direct usage in the primary playback flow isn't obvious yet.
-                *   Multiple different sets of `yt-dlp` options are used in different contexts.
-    *   **DONE**: Read `src/utils/constants.py` to get `YTDL_OPTIONS` and `FFMPEG_OPTIONS`.
-        *   `YTDL_OPTIONS` (main options for song info/preloading):
-            *   `format`: 'bestaudio/best'
-            *   `socket_timeout`: 2, `retries`: 1 (aggressive, potential for premature failures)
-            *   `nocheckcertificate`: True (security concern)
-            *   `noplaylist`: True
-            *   `source_address`: '0.0.0.0'
-            *   `ignoreerrors`: True
-            *   `extract_flat`: 'in_playlist'
-        *   `FFMPEG_OPTIONS` (for `FFmpegPCMAudio`):
-            *   `before_options`: '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -analyzeduration 0 -probesize 32000 -thread_queue_size 4096'
-                *   Reconnect options are good for stream stability.
-                *   `-analyzeduration 0 -probesize 32000`: Extremely aggressive for fast startup, but high risk of playback issues (stuttering, no audio, incorrect format detection).
-            *   `options`: '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le -flags low_delay -threads 1' (standard for Discord audio)
-        *   Other `YTDL_OPTIONS` sets exist for `_extract_info`, live streams, and downloads.
-    *   **IN PROGRESS**: Examine audio buffering (`FFmpegPCMAudio` usage) and streaming in light of `FFMPEG_OPTIONS`.
-    *   **IN PROGRESS**: Analyze queue management and preloading logic in detail, clarifying how `preload_next_songs` futures update `_song_cache`.
-        *   `_prefetch_song` (likely target of `preload_next_songs` futures) populates `_song_cache` and attempts a `requests.head()` pre-warm.
-4.  **IN PROGRESS**: Suggest optimizations based on analysis.
-    *   **DONE**: Applied initial an_sugested_optimizations to `src/utils/constants.py`:
-        *   `FFMPEG_OPTIONS['before_options']`: Removed aggressive `-analyzeduration 0 -probesize 32000` (reverted to FFmpeg defaults) to improve playback stability.
-        *   `YTDL_OPTIONS`:
-            *   Increased `socket_timeout` to 10 (from 2).
-            *   Increased `retries` to 3 (from 1).
-            *   Set `nocheckcertificate` to `False` (from `True`) for security.
-    *   **TODO**: User to test the an_sugested_optimizations and provide feedback.
-    *   Potential areas for further optimization discussion:
-        *   Loop inefficiency (re-fetching info every loop).
-        *   Preloading strategy refinement.
-        *   Consistency of `yt-dlp` options across different methods.
-        *   Thread pool sizes.
-        *   Further tuning of `FFMPEG_OPTIONS` (`analyzeduration`, `probesize`) if defaults are too slow.
-
-## Phase 2: Optimization Implementation (Iterative)
-
-*   **TODO**: Implement agreed-upon optimization strategies one by one.
-*   **TODO**: Test each optimization for impact on:
-    *   Buffer-to-play time.
-    *   Stuttering when adding songs.
-    *   Overall stability and performance.
-
-## Phase 3: Review and Refinement
-
-*   **TODO**: Review overall changes.
-*   **TODO**: Make further adjustments as needed.
+**Architecture Achieved:**
+- Full separation of audio processing from the Discord bot client.
+- Headless Player Service, event-driven state synchronization, and a solid foundation for the Bot Client.
 
 ---
-*This file is for tracking progress. Please do not edit manually unless you are the AI assistant.*
+
+**Bot Client as Lightweight Controller:**
+- Removed all player logic, direct MusicPlayer instantiations, and yt-dlp/FFmpeg management from the bot client. The bot now uses IPC for all audio operations.
+- Developed `src/utils/ipc_client.py` with an `IPCClient` class for ZeroMQ communication and an `IPCManager` for high-level operations. Added command methods and event handlers, including an automatic event listener.
+- Updated the bot to capture and forward voice connection details to the Player Service, including proper handling of connection/disconnection events.
+- All music commands (`!play`, `!skip`, `!queue`, etc.) now delegate to the Player Service via IPC.
+- Temporarily disabled features like loop and live, to be re-implemented in the Player Service.
+
+**Files Modified/Created:**
+- `src/bot/client.py`, `src/cogs/music.py`, `src/requirements.txt`, `src/utils/ipc_client.py`
+
+**Architecture Achieved:**
+- The Bot Client is now a lightweight controller, with all music commands handled via ZeroMQ IPC and event-driven updates from the Player Service.
+
+---
+
+**Persistent Server-Specific Settings:**
+- Designed and implemented a SQLite database schema for persistent guild settings, including control channel and embed message IDs, with metadata and indexing for performance.
+- Created `src/utils/database.py` with a `DatabaseManager` class for async CRUD operations, type-safe dataclasses, thread safety, and error handling.
+- All database operations are asynchronous and thread-safe, with auto-initialization and built-in statistics.
+
+**Files Created/Modified:**
+- `src/utils/database.py`, `src/requirements.txt`
+
+**Database Features:**
+- Lightweight, async, persistent, and type-safe storage for guild settings.
+
+**Schema Example:**
+
+---
+
+### User Story 1.1 Completion - Communication Protocol Definition
+
+**Epic 1, User Story 1.1: Communication Protocol Implementation Verified**
+
+✅ **ZeroMQ IPC Technology Selection Confirmed:**
+- **REQ/REP Pattern:** Successfully implemented for commands (Bot Client → Player Service)
+- **PUB/SUB Pattern:** Successfully implemented for events (Player Service → Bot Client)
+- **Protocol Configuration:** Robust configuration with timeouts, retries, and error handling
+
+✅ **JSON Message Contract Validation:**
+- **Base Message Structure:** Standardized IPCMessage with type, action, guild_id, data, and timestamp
+- **Command Messages:** All planned commands implemented (CONNECT, DISCONNECT, ADD_TO_QUEUE, SKIP_SONG, RESET_PLAYER) plus additional commands (GET_STATE, REMOVE_FROM_QUEUE)
+- **Event Messages:** All planned events implemented (SONG_STARTED, QUEUE_UPDATED, PLAYER_IDLE) plus additional events (SONG_ENDED, PLAYER_ERROR, STATE_UPDATE)
+- **Data Structures:** Comprehensive dataclasses for ConnectData, AddToQueueData, SongData, StateData, ErrorData
+
+✅ **Implementation Status:**
+- **Protocol Definition:** Complete in `src/utils/ipc_protocol.py` with full documentation
+- **Player Service:** Complete ZeroMQ server implementation in `player_main.py`  
+- **Bot Client:** Complete ZeroMQ client implementation in `src/utils/ipc_client.py`
+- **Communication Testing:** IPC communication verified with mock services showing successful:
+  - Command sending and response handling (REQ/REP)
+  - Event publishing and subscription (PUB/SUB)
+  - JSON message serialization/deserialization
+  - Windows compatibility with proper event loop policy
+
+**Files Involved:**
+- `src/utils/ipc_protocol.py` - Protocol definitions and message helpers
+- `player_main.py` - Player Service ZeroMQ server
+- `src/utils/ipc_client.py` - Bot Client ZeroMQ client and IPCManager
+
+**Architecture Status:** User Story 1.1 is complete. The robust, low-latency communication protocol between Bot Client and Player Service is fully implemented and tested.
+
+---
+
+### User Story 1.2 Completion - Standalone Headless Player Service
+
+**Epic 1, User Story 1.2: Standalone Player Service Application Verified**
+
+✅ **Project Directory Structure:**
+- **Logical Separation Achieved:** While physical `bot-client/` and `player-service/` directories weren't created, the codebase achieves complete logical separation with clear boundaries between services
+- **Player Service Isolation:** `player_main.py` serves as the standalone Player Service entry point
+- **Bot Client Isolation:** All bot client code remains in `src/` directory with clear IPC-based communication
+
+✅ **Headless Player Service Entry Point:**
+- **Entry Point:** `player_main.py` serves as the main executable for the Player Service
+- **No Discord Gateway:** Confirmed no `discord.py` imports for Gateway connections - completely headless
+- **ZMQ Initialization:** Proper REP socket for commands and PUB socket for events
+- **Command Processing Loop:** Infinite loop listening for IPC commands with robust error handling
+- **Multi-Guild Support:** Maintains dictionary of MusicPlayerService instances keyed by guild_id
+
+✅ **MusicPlayer Core Adaptation:**
+- **Refactored Class:** `src/core/music_player_service.py` contains the adapted MusicPlayerService
+- **Guild-ID Only Init:** `__init__(guild_id, config, event_socket, logger)` - no Discord objects
+- **Voice Connection Method:** `connect(channel_id, token, endpoint, session_id)` method implemented
+- **Removed Discord Dependencies:** `ensure_voice_client()` method removed as planned
+- **Independent Operation:** Works completely independently of Discord bot client
+
+✅ **Player Service Command Handler:**
+- **Message Parsing:** Robust JSON message parsing using `IPCMessage.from_json()`
+- **Command Routing:** All commands (CONNECT, DISCONNECT, ADD_TO_QUEUE, SKIP_SONG, GET_STATE, RESET_PLAYER, REMOVE_FROM_QUEUE) properly routed
+- **Player Instance Management:** Automatic creation and management of MusicPlayerService instances per guild
+- **Response Handling:** Structured JSON responses with status and data
+- **Error Management:** Comprehensive error handling and logging
+
+✅ **IPC Event Emitter Implementation:**
+- **Event Methods:** Complete set of event emission methods (_send_song_started, _send_song_ended, _send_queue_update, _send_player_idle, _send_error_event, _send_state_update)
+- **ZMQ Publishing:** Events published via ZMQ PUB socket to Bot Client
+- **Action Triggers:** Events sent after state changes (song start, queue update, player idle)
+- **Protocol Compliance:** Full compliance with IPC protocol event definitions
+- **Automatic Updates:** Real-time state synchronization with Bot Client
+
+**Files Involved:**
+- `player_main.py` - Headless Player Service application entry point
+- `src/core/music_player_service.py` - Adapted MusicPlayer core without Discord dependencies
+- `src/utils/ipc_protocol.py` - Supporting IPC protocol definitions
+
+**Architecture Status:** User Story 1.2 is complete. The standalone, headless Player Service application is fully implemented with proper command handling, event emission, and multi-guild support.
+
+---
+
+### User Story 1.3 Completion - Lightweight Bot Client Controller
+
+**Epic 1, User Story 1.3: Bot Client Refactored as Lightweight Controller Verified**
+
+✅ **Audio Logic Removal:**
+- **No Direct Audio Management:** Confirmed removal of all yt-dlp and FFmpeg direct management from Bot Client
+- **No Music Players Dictionary:** Replaced with IPC Manager for Player Service communication
+- **Clean Separation:** Bot Client has zero knowledge of audio processing internals
+- **IPC-Only Communication:** All audio operations delegated to Player Service via ZeroMQ
+
+✅ **IPC Client Utility Implementation:**
+- **Complete IPC Infrastructure:** `src/utils/ipc_client.py` contains IPCClient and IPCManager classes
+- **Command Interface:** Provides async `send_command()` functionality for all Player Service commands
+- **Event Listener:** Background task listening on ZMQ SUB socket for Player Service events
+- **Connection Management:** Robust ZeroMQ REQ and SUB socket management with proper cleanup
+- **Error Handling:** Comprehensive error handling and retry logic
+
+✅ **Slash Command Handler Refactoring:**
+- **IPC Delegation Pattern:** All commands (play, skip, leave, p5, reset, queue) follow the required pattern:
+  1. Defer response (`interaction.response.defer()`)
+  2. Call IPC client with appropriate command
+  3. Send follow-up message confirming action
+- **No Direct Audio Calls:** Commands delegate to Player Service without direct audio processing
+- **Structured Responses:** Proper handling of Player Service responses with status and data
+
+✅ **Voice State Forwarding Implementation:**
+- **Connection Detail Capture:** Bot captures voice token, endpoint, session_id, and channel_id from Discord
+- **Automatic CONNECT Commands:** Voice server updates automatically trigger CONNECT commands to Player Service
+- **State Management:** Maintains voice state dictionary for proper connection tracking
+- **Disconnect Handling:** Properly handles voice disconnections and forwards to Player Service
+
+✅ **Bot Client Event Handler:**
+- **ZMQ Event Listening:** Background task listens for all Player Service events
+- **UI Update Delegation:** Events trigger appropriate UI updates via Music cog methods:
+  - SONG_STARTED → start_now_playing_updates()
+  - SONG_ENDED → stop_now_playing_updates()
+  - QUEUE_UPDATED → update_queue_display()
+  - PLAYER_IDLE → idle state UI updates
+- **Event Registration:** All event types properly registered with corresponding handlers
+- **Real-time Synchronization:** UI stays synchronized with Player Service state
+
+**Files Involved:**
+- `src/bot/client.py` - Lightweight bot client with IPC Manager integration
+- `src/cogs/music.py` - Refactored slash commands delegating to IPC
+- `src/utils/ipc_client.py` - Complete IPC client and manager implementation
+
+**Architecture Status:** User Story 1.3 is complete. The Bot Client is now a lightweight controller that delegates all audio operations to the Player Service while maintaining responsive UI updates through event-driven synchronization.
+
+---
+
+### User Story 1.4 Completion - Containerized Service Orchestration
+
+**Epic 1, User Story 1.4: Containerized and Orchestrated Services for Reliable Deployment Implemented**
+
+✅ **Bot Client Containerization:**
+- **Lightweight Dockerfile**: `bot-client.Dockerfile` with `python:3.11-slim` base image
+- **No FFmpeg Dependencies**: Clean separation - bot client has no audio processing dependencies
+- **Environment Configuration**: Supports Docker networking via environment variables
+- **IPC Client Setup**: Configured to connect to player-service via hostname resolution
+
+✅ **Player Service Containerization:**
+- **Audio-Ready Dockerfile**: `player-service.Dockerfile` with FFmpeg installation
+- **Audio Dependencies**: Includes `apt-get install -y ffmpeg` for audio processing
+- **Port Exposure**: Exposes ports 5555 (commands) and 5556 (events) for IPC communication
+- **Headless Operation**: Runs `player_main.py` as standalone audio processing service
+
+✅ **Docker Compose Orchestration:**
+- **Two-Service Architecture**: `docker-compose-services.yml` defines bot-client and player-service
+- **Custom Bridge Network**: `cafebot-net` enables hostname-based service communication
+- **Environment File Support**: `.env` file configuration for secure bot token management
+- **Service Dependencies**: Proper startup order with `depends_on: player-service`
+- **Restart Policies**: `restart: unless-stopped` for service resilience
+- **Volume Mounting**: Shared configuration and log directories
+
+✅ **Network Communication Configuration:**
+- **Hostname Resolution**: Bot client connects to `tcp://player-service:5555` and `tcp://player-service:5556`
+- **Environment Variables**: `PLAYER_SERVICE_HOST`, `COMMAND_PORT`, `EVENT_PORT` for Docker networking
+- **IPC Protocol Updates**: Separate configs for bot client (connecting) and player service (binding)
+- **Service Isolation**: Custom bridge network isolates services while enabling communication
+
+✅ **Deployment Infrastructure:**
+- **Comprehensive Documentation**: `DEPLOYMENT.md` with setup instructions and troubleshooting
+- **Environment Template**: `env.example` for configuration guidance
+- **Build Validation**: Docker Compose configuration validated and ready for deployment
+- **Monitoring Commands**: Health check and logging commands for operational management
+
+**Files Created/Modified:**
+- `bot-client.Dockerfile` - Lightweight bot client container without FFmpeg
+- `player-service.Dockerfile` - Audio processing container with FFmpeg
+- `docker-compose-services.yml` - Two-service orchestration configuration
+- `env.example` - Environment configuration template
+- `DEPLOYMENT.md` - Comprehensive deployment and troubleshooting guide
+- `src/utils/ipc_protocol.py` - Updated with Docker networking support
+- `player_main.py` - Updated to use player service configuration
+- `src/utils/ipc_client.py` - Updated to use bot client configuration
+
+**Architecture Status:** User Story 1.4 is complete. Both services are fully containerized with proper orchestration, networking, and deployment infrastructure. The system is ready for reliable production deployment using `docker-compose up`.
+
+---
+
+### Build Fixes & Deployment Validation
+
+**Docker Build Issues Resolved:**
+✅ **Environment Variable Parsing**: Fixed critical configuration parsing issues in `src/utils/config.py`:
+- Added `safe_int()` function to handle placeholder values like `'your_discord_user_id_here'` gracefully
+- Fixed OWNER_ID environment variable parsing to prevent ValueError crashes
+- Enhanced MAX_QUEUE_SIZE and TIMEOUT_DURATION parsing with safe integer conversion
+
+✅ **Bot Token Configuration**: Improved bot token handling robustness:
+- Added `get_bot_token()` function supporting both `BOT_TOKEN` and `DISCORD_TOKEN` environment variables
+- Implemented placeholder value detection to ignore template values like `'your_discord_bot_token_here'`
+- Added fallback mechanisms for missing or invalid token configurations
+
+✅ **Full System Validation**: Successfully validated complete system operation:
+- **Player Service**: Starts successfully, binds to ports 5555/5556, processes commands
+- **Bot Client**: Successfully connects to Discord Gateway and Player Service via ZeroMQ IPC
+- **IPC Communication**: REQ/REP and PUB/SUB patterns working correctly between services
+- **Database**: SQLite database initializes successfully for guild settings persistence
+- **Docker Orchestration**: Both services start and communicate properly in containerized environment
+
+**Files Modified:**
+- `src/utils/config.py` - Enhanced environment variable parsing with error handling
+
+**Architecture Status:** The Discord music bot build is now fully functional. Both the lightweight Bot Client and headless Player Service start successfully in Docker containers with proper IPC communication established. The system is ready for testing and further development.
+
+---
+
+### Setup Command Fix - Session Persistence Issue Resolved
+
+**Problem Identified:** 
+The `/setup` command DM response mechanism was failing because setup sessions were stored in-memory and lost when the bot restarted. Users would run `/setup`, receive a DM, but when they responded with a channel name like `#test-bot-playground`, they got "Setup Session Not Found" errors.
+
+**Root Cause Analysis:**
+- Setup sessions were stored in `self.bot.setup_sessions` (in-memory dictionary)
+- Bot restarts (which happened multiple times) cleared all active sessions
+- Session creation happened AFTER DM sending, so failures could leave incomplete state
+- No persistence mechanism for setup sessions across restarts
+
+**Solution Implemented:**
+✅ **Database-Persistent Sessions**: Added `setup_sessions` table to SQLite database with schema:
+- `user_id` (INTEGER, PRIMARY KEY): Discord user ID
+- `guild_id` (INTEGER, NOT NULL): Guild being set up  
+- `guild_name` (TEXT, NOT NULL): Guild name for reference
+- `started_at` (TIMESTAMP, NOT NULL): Session start time
+- Proper indexing for performance
+
+✅ **Session Management Functions**: Added complete CRUD operations:
+- `create_setup_session()`: Create new session with validation
+- `get_setup_session()`: Retrieve session by user ID
+- `delete_setup_session()`: Clean up completed/failed sessions
+- `cleanup_expired_setup_sessions()`: Automatic cleanup of expired sessions
+
+✅ **Improved Setup Command Flow**:
+- Session creation moved BEFORE DM sending (ensures session exists when user responds)
+- Comprehensive error handling with session cleanup on failures
+- Added logging for debugging setup command flow
+- Validation that session creation succeeds before proceeding
+
+✅ **Enhanced Error Handling & Recovery**:
+- Graceful handling of DM failures (disabled DMs) with session cleanup
+- User-friendly recovery messages for expired/lost sessions
+- Automatic cleanup of expired sessions on bot startup
+- Debug logging for troubleshooting
+
+✅ **Session Expiry & Cleanup**:
+- 5-minute session timeout maintained
+- Automatic cleanup on bot startup removes stale sessions
+- Proper datetime handling with ISO format timestamps
+
+**Files Modified:**
+- `src/utils/database.py` - Added setup session table and management functions
+- `src/cogs/music.py` - Updated setup command to use database persistence
+- `src/bot/client.py` - Added session cleanup on bot startup
+
+**Critical Datetime Fix Applied:**
+✅ **Timezone Comparison Error Resolved**: Fixed `TypeError: can't subtract offset-naive and offset-aware datetimes` that occurred when users responded to setup DMs. The error happened because of mixed timezone-aware and timezone-naive datetime usage throughout the codebase:
+- Setup sessions used `discord.utils.utcnow().isoformat()` (timezone-aware) when created
+- Multiple locations used `datetime.utcnow()` (timezone-naive) for comparison
+- **Fixed in multiple files**: `music.py` (lines 516, 601), `now_playing.py` (lines 9, 44), database session handling
+- **Solution**: Using `discord.utils.utcnow()` consistently throughout for timezone-aware operations
+
+**Testing Status:** 
+- ✅ Database operations verified working correctly
+- ✅ Session creation, retrieval, and deletion tested
+- ✅ Bot rebuilds and starts successfully
+- ✅ Datetime timezone comparison fixed and tested
+- 🔄 Ready for user testing of complete setup flow
+
+**Architecture Status:** Setup command session persistence is now fully implemented with database backing and proper timezone handling. The `/setup` command should work reliably across bot restarts, and users can complete the setup process by responding to DMs with channel names without encountering datetime errors.
+
+---
+
+### Setup DM Spam Prevention - Only Send DMs for New Guilds
+
+**Problem Identified:**
+The bot was sending setup DMs to guild owners on every restart, even for servers that were already configured. This was happening because the `on_ready` event was checking ALL guilds and triggering setup flows for any unconfigured ones.
+
+**Root Cause:**
+- `on_ready` event called `_check_guild_setups()` on every bot startup
+- This method looped through ALL guilds and sent setup DMs to unconfigured ones
+- While the logic was correct for first-time deployment, it was inappropriate for routine restarts
+- Guild owners were getting spammed with setup DMs every time the bot restarted
+
+**Solution Implemented:**
+✅ **Removed Auto-Setup from Startup**: Removed the `_check_guild_setups()` call from `on_ready` event to prevent setup DMs on every restart
+
+✅ **Enhanced Guild Join Logic**: Improved `on_guild_join` event with database checks:
+- Only sends setup DMs for truly new/unconfigured guilds
+- Checks if guild already has setup before sending DM (handles rejoining scenarios)
+- Added comprehensive logging for transparency
+- Fallback behavior in case of database errors
+
+✅ **Smart Setup DM Behavior**:
+- **Send DM**: Only when bot joins a new, unconfigured guild
+- **Skip DM**: For already-configured guilds (rejoining scenarios)
+- **No DMs**: On bot restarts, regardless of configuration status
+
+**Files Modified:**
+- `src/bot/client.py` - Removed auto-setup from on_ready, enhanced on_guild_join logic
+
+**Testing Status:**
+- ✅ Bot rebuilt and restarted successfully
+- ✅ Setup DMs now only sent for new guilds, not on restarts
+- ✅ Proper logging added for debugging setup flow
+
+**Architecture Status:** Setup DM behavior is now user-friendly and non-intrusive. Guild owners will only receive setup DMs when the bot first joins their server and it's not already configured. No more spam on bot restarts.
+
+---
+
+### Voice Architecture Redesign - Persistent Connection Solution
+
+**Problem Identified:**
+The original voice architecture had fundamental conflicts where both bot client and player service were trying to manage Discord voice connections separately, causing connection issues and disconnections after every song.
+
+**Root Cause:**
+- Bot client was connecting to Discord voice but trying to transfer control to player service via IPC
+- Player service attempted to create its own Discord voice connections
+- Voice clients can't be transferred between processes, causing connection conflicts
+- This resulted in the "Cannot play - not connected to voice channel" error
+
+**Solution Implemented:**
+✅ **Persistent Voice Connection Architecture**:
+- **Bot Client**: Maintains persistent Discord voice connection across all songs
+- **Player Service**: Handles audio processing (yt-dlp), queue management, provides audio URLs
+- **IPC Audio Flow**: Player service → extracts audio URLs → sends SONG_STARTED events → bot client streams to Discord
+
+✅ **Separation of Concerns**:
+- **Bot Client Responsibilities**: Discord connection, voice streaming, user interactions, embed updates
+- **Player Service Responsibilities**: Audio processing, URL extraction, queue management, playback logic
+- **No Voice Transfer**: Eliminated attempts to transfer voice clients between processes
+
+✅ **Persistent Connection Benefits**:
+- Voice connection stays active between songs
+- No disconnection/reconnection cycle
+- Faster song transitions
+- More reliable audio streaming
+
+**Files Modified:**
+- `src/core/music_player_service.py` - Removed voice connection logic, added audio URL extraction
+- `src/cogs/music.py` - Simplified voice connection handling
+- `src/utils/ipc_client.py` - Added audio streaming from player service URLs
+- `src/bot/client.py` - Enhanced voice state logging
+
+**Architecture Status:** Voice architecture redesigned with persistent connections. Bot client maintains stable Discord voice connection while player service handles all audio processing and provides streamable URLs. This eliminates connection conflicts and provides reliable, persistent voice functionality.
+
+---
+
+### Bug Fixes & Code Quality Improvements
+
+**Critical Runtime Fixes Applied:**
+✅ **Unawaited Coroutine Fix**: Fixed RuntimeWarning in `QueueView._update_remove_buttons` method by removing incorrect `async` keyword from `create_remove_callback` function. The function was creating unawaited coroutines instead of returning callback functions.
+
+✅ **ZMQ Cancellation Handling**: Improved ZeroMQ shutdown handling in IPC client to prevent asyncio.CancelledError exceptions:
+- Enhanced `_event_listener` with proper ZMQ error handling during shutdown
+- Added timeout and proper cancellation handling in `disconnect` method
+- Improved context termination with error handling
+
+✅ **Bot Shutdown Sequence**: Added proper `close()` method override to MusicBot class ensuring IPC manager shutdown before Discord client shutdown. Updated `on_disconnect` to avoid duplicate IPC cleanup.
+
+✅ **Indentation Error Fix**: Resolved critical syntax error in `src/core/music_player_service.py` line 465 where orphaned code blocks with incorrect indentation were preventing player service startup.
+
+**Files Modified:**
+- `src/cogs/music.py` - Fixed unawaited coroutine in QueueView remove buttons
+- `src/utils/ipc_client.py` - Enhanced ZMQ cancellation and shutdown handling  
+- `src/bot/client.py` - Added proper close method and improved disconnect handling
+- `src/core/music_player_service.py` - Fixed indentation syntax error
+
+**Testing Status:**
+- ✅ Bot client starts successfully and connects to Discord
+- ✅ Player service starts without syntax errors
+- ✅ IPC communication established between services
+- ✅ Voice connection handshake completes successfully
+- ✅ Queue functionality working (songs can be added)
+- ✅ No more runtime warnings or cancellation errors
+- 🔄 Minor `asdict()` dataclass error remains to be addressed
+
+**Architecture Status:** All critical bugs resolved. Bot services are running stably with proper error handling, clean shutdown sequences, and reliable IPC communication. Ready for full functionality testing and user interaction.

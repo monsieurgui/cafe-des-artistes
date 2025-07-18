@@ -1,0 +1,1 @@
+The current plan is to make the bot work. Using docker, you will make sure each components build and then, with the help of the user, fix all the bugs. There is no end to this task unless the user says so.

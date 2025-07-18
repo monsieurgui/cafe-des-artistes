@@ -36,4 +36,3 @@ src/config/config.yaml
 *.log
 
 .env
-.env.*
