@@ -62,6 +62,7 @@ class Event(Enum):
     QUEUE_UPDATED = "QUEUE_UPDATED"
     PLAYER_IDLE = "PLAYER_IDLE"
     PLAYER_ERROR = "PLAYER_ERROR"
+    PLAYER_STOP = "PLAYER_STOP"
     STATE_UPDATE = "STATE_UPDATE"
 
 
@@ -244,12 +245,19 @@ def create_song_ended_event(guild_id: int, song_data: SongData) -> EventMessage:
 
 def create_queue_updated_event(guild_id: int, queue: list) -> EventMessage:
     """Create a QUEUE_UPDATED event message"""
-    return EventMessage(Event.QUEUE_UPDATED, guild_id, {"queue": queue})
+    # Convert SongData objects to dictionaries for JSON serialization
+    queue_data = [asdict(song) if hasattr(song, '__dataclass_fields__') else song for song in queue]
+    return EventMessage(Event.QUEUE_UPDATED, guild_id, {"queue": queue_data})
 
 
 def create_player_idle_event(guild_id: int) -> EventMessage:
     """Create a PLAYER_IDLE event message"""
     return EventMessage(Event.PLAYER_IDLE, guild_id)
+
+
+def create_player_stop_event(guild_id: int) -> EventMessage:
+    """Create a PLAYER_STOP event message"""
+    return EventMessage(Event.PLAYER_STOP, guild_id)
 
 
 def create_player_error_event(guild_id: int, error_type: str, error_message: str, 

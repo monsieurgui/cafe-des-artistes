@@ -77,7 +77,7 @@ class QueueView(discord.ui.View):
         if not self.queue_data:
             embed.description = "Queue is empty"
             embed.set_footer(text="Use /play to add songs to the queue")
-            self._clear_remove_buttons()
+            self._add_disabled_select_menu()
             return embed
         
         # Calculate start and end indices for current page
@@ -87,7 +87,7 @@ class QueueView(discord.ui.View):
         # Get songs for current page
         current_page_songs = self.queue_data[start_idx:end_idx]
         
-        # Create description with 10 songs per page
+        # Create description with 10 songs per page using new rich format
         description_lines = []
         
         for i, song in enumerate(current_page_songs):
@@ -95,60 +95,91 @@ class QueueView(discord.ui.View):
             title = song.get('title', 'Unknown')
             duration = song.get('duration', 0)
             duration_str = self._format_duration(duration)
-            requester = song.get('requester', 'Unknown')
+            requester = song.get('requester_name', song.get('requester', 'Unknown'))
+            webpage_url = song.get('webpage_url', song.get('url', ''))
             
-            description_lines.append(f"{song_number}. [{title}]({song.get('url', '')}) - ({duration_str}) - Added by {requester}")
-        
-        # Fill remaining lines with placeholders to maintain constant height
-        while len(description_lines) < self.songs_per_page:
-            description_lines.append("-")
+            # New rich format with hyperlinked title and metadata line with better spacing
+            description_lines.append(f"**{song_number}.** [{title}]({webpage_url})")
+            description_lines.append(f"> └─ 🕒 `{duration_str}`  •  👤 `{requester}`")
+            
+            # Add separator line between songs (except for the last song)
+            if i < len(current_page_songs) - 1:
+                description_lines.append("")  # Empty line for spacing
         
         embed.description = "\n".join(description_lines)
         
         # Set footer with page information
         embed.set_footer(text=f"Page {self.current_page}/{self.total_pages} • {len(self.queue_data)} total songs")
         
-        # Update remove buttons for current page
-        self._update_remove_buttons(current_page_songs, start_idx)
+        # Update remove select menu for current page
+        self._update_remove_select_menu(current_page_songs, start_idx)
         
         return embed
     
-    def _clear_remove_buttons(self):
-        """Clear all remove buttons from the view"""
-        # Remove all remove buttons (keep navigation buttons)
+    def _clear_remove_select_menu(self):
+        """Clear the remove select menu from the view"""
         items_to_remove = []
         for item in self.children:
-            if hasattr(item, 'custom_id') and item.custom_id and item.custom_id.startswith('remove_song_'):
+            if hasattr(item, 'custom_id') and item.custom_id == 'remove_song_select':
                 items_to_remove.append(item)
         
         for item in items_to_remove:
             self.remove_item(item)
     
-    def _update_remove_buttons(self, current_page_songs, start_idx):
-        """Update remove buttons for the current page songs"""
-        # Clear existing remove buttons
-        self._clear_remove_buttons()
+    def _add_disabled_select_menu(self):
+        """Add a disabled select menu for empty queue state"""
+        # Clear any existing select menu first
+        self._clear_remove_select_menu()
         
-        # Add remove buttons for each song on current page
+        # Create a disabled select menu with placeholder message
+        disabled_select = discord.ui.Select(
+            placeholder="The queue is currently empty.",
+            custom_id="remove_song_select",
+            options=[discord.SelectOption(label="No songs", description="Queue is empty", value="empty")],
+            disabled=True,
+            row=2
+        )
+        
+        self.add_item(disabled_select)
+    
+    def _update_remove_select_menu(self, current_page_songs, start_idx):
+        """Update remove select menu for the current page songs"""
+        # Clear existing select menu
+        self._clear_remove_select_menu()
+        
+        if not current_page_songs:
+            return
+        
+        # Create select options for each song on current page
+        options = []
         for i, song in enumerate(current_page_songs):
             song_index = start_idx + i  # Actual index in the queue
+            title = song.get('title', 'Unknown')
+            requester = song.get('requester_name', song.get('requester', 'Unknown'))
             
-            # Create remove button for this song
-            remove_button = discord.ui.Button(
-                label="❌",
-                style=discord.ButtonStyle.danger,
-                custom_id=f"remove_song_{song_index}",
-                row=2 + (i // 5)  # Distribute across rows 2, 3, 4 (5 buttons per row)
+            # Truncate title if too long for select option
+            if len(title) > 90:
+                title = title[:87] + "..."
+            
+            option = discord.SelectOption(
+                label=title,
+                description=f"Position: {song_index + 1} | Added by: {requester}",
+                value=str(song_index),
+                emoji="🗑️"
             )
-            
-            # Create callback for this specific song
-            def create_remove_callback(idx):
-                async def remove_callback(interaction: discord.Interaction):
-                    await self._handle_remove_song(interaction, idx)
-                return remove_callback
-            
-            remove_button.callback = create_remove_callback(song_index)
-            self.add_item(remove_button)
+            options.append(option)
+        
+        # Create the select menu
+        remove_select = discord.ui.Select(
+            placeholder="Select a song to remove from the queue...",
+            custom_id="remove_song_select",
+            options=options,
+            row=2  # Place in row 2 (below navigation buttons)
+        )
+        
+        # Set the callback
+        remove_select.callback = self._handle_remove_song_select
+        self.add_item(remove_select)
     
     async def _handle_remove_song(self, interaction: discord.Interaction, song_index: int):
         """Handle remove song button click"""
@@ -187,6 +218,73 @@ class QueueView(discord.ui.View):
                 
         except Exception as e:
             await interaction.response.send_message(f"❌ Error removing song: {str(e)}", ephemeral=True)
+    
+    async def _handle_remove_song_select(self, interaction: discord.Interaction):
+        """Handle song removal from select menu"""
+        try:
+            from utils.embeds import success, error
+            
+            # Get the selected song index
+            selected_value = interaction.data['values'][0]
+            song_index = int(selected_value)
+            
+            # Get song title for feedback message
+            song_title = "Unknown"
+            if self.queue_data and 0 <= song_index < len(self.queue_data):
+                song_title = self.queue_data[song_index].get('title', 'Unknown')
+            
+            if self.bot and self.guild_id:
+                # Send REMOVE_FROM_QUEUE command to Player Service
+                result = await self.bot.ipc_manager.ipc_client.remove_from_queue(self.guild_id, song_index)
+                
+                if result['status'] == 'success':
+                    # Get updated queue state
+                    state_result = await self.bot.ipc_manager.ipc_client.get_player_state(self.guild_id)
+                    
+                    if state_result['status'] == 'success':
+                        updated_queue = state_result.get('data', {}).get('state', {}).get('queue', [])
+                        
+                        # Update the view with new queue data
+                        self.queue_data = updated_queue
+                        self.total_pages = max(1, (len(updated_queue) + self.songs_per_page - 1) // self.songs_per_page)
+                        
+                        # Adjust current page if necessary
+                        if self.current_page > self.total_pages:
+                            self.current_page = max(1, self.total_pages)
+                        
+                        # Update button states and generate new embed
+                        self._update_button_states()
+                        embed = self._generate_queue_embed()
+                        
+                        # Update the message with new embed
+                        await interaction.response.edit_message(embed=embed, view=self)
+                        
+                        # Send ephemeral success message
+                        await interaction.followup.send(
+                            embed=success(f"Successfully removed \"{song_title}\" from the queue."),
+                            ephemeral=True
+                        )
+                    else:
+                        await interaction.response.send_message(
+                            embed=error("Failed to get updated queue state."),
+                            ephemeral=True
+                        )
+                else:
+                    await interaction.response.send_message(
+                        embed=error(f"Failed to remove song: {result.get('message', 'Unknown error')}"),
+                        ephemeral=True
+                    )
+            else:
+                await interaction.response.send_message(
+                    embed=error("Unable to remove song - no connection to player service."),
+                    ephemeral=True
+                )
+                
+        except Exception as e:
+            await interaction.response.send_message(
+                embed=error(f"Error removing song: {str(e)}"),
+                ephemeral=True
+            )
     
     def _format_duration(self, seconds: float) -> str:
         """Format a duration in seconds to a readable HH:MM:SS format"""
@@ -454,12 +552,15 @@ class Music(commands.Cog):
                         except discord.NotFound:
                             pass  # Message was deleted
                         
-                        # Clear now playing embed
+                        # Clear now playing embed - generate idle image
                         try:
                             now_playing_message = await control_channel.fetch_message(guild_settings.now_playing_message_id)
-                            # Use the new now playing embed generation
-                            empty_now_playing_embed = self._generate_now_playing_embed()
-                            await now_playing_message.edit(embed=empty_now_playing_embed)
+                            # Generate idle state image
+                            from utils.image_generator import create_now_playing_image
+                            idle_image_buffer = await create_now_playing_image(None, 0)
+                            discord_file = discord.File(idle_image_buffer, filename="now_playing.png")
+                            embed = self._create_image_embed()
+                            await now_playing_message.edit(embed=embed, attachments=[discord_file])
                         except discord.NotFound:
                             pass  # Message was deleted
                             
@@ -496,98 +597,24 @@ class Music(commands.Cog):
         except Exception as e:
             print(f"Error updating queue display: {e}")
 
-    def _generate_now_playing_embed(self, song_data=None, start_time=None):
+    def _create_image_embed(self):
         """
-        Generate the Now Playing embed for the control panel with enhanced visual design
+        Create a simplified embed container for the dynamically generated Now Playing image.
+        This replaces the complex text-based embed with a simple container for the image.
         
-        Args:
-            song_data: Song information dict or None
-            start_time: When the song started playing (for progress calculation)
-            
         Returns:
-            discord.Embed: The Now Playing embed with inline fields
+            discord.Embed: Simple embed that displays the attached image
         """
-        if not song_data:
-            # Idle state - No song playing
-            embed = discord.Embed(
-                title="No Song Playing",
-                description="",
-                color=COLORS['INFO']
-            )
-            embed.set_footer(text="Use /play to start playing music")
-            
-            return embed
-        
-        # Song is playing - new enhanced layout
-        song_title = song_data.get('title', 'Unknown')
-        song_url = song_data.get('webpage_url') or song_data.get('url')
-        
-        # Create embed with song title as hyperlink if URL is available
-        if song_url:
-            embed = discord.Embed(
-                title=song_title,
-                url=song_url,
-                color=COLORS['INFO']
-            )
-        else:
-            embed = discord.Embed(
-                title=song_title,
-                color=COLORS['INFO']
-            )
-        
-        
-        # Duration and progress calculation for description
-        duration = song_data.get('duration', 0)
-        current_time = 0
-        
-        if start_time:
-            current_time = (discord.utils.utcnow() - start_time).total_seconds()
-        
-        # Description contains only the progress bar
-        if duration and duration > 0:
-            progress_text = (
-                f"`{self._format_duration(int(current_time))} / "
-                f"{self._format_duration(duration)}`\n"
-                f"{self._create_progress_bar(current_time, duration)}"
-            )
-            embed.description = progress_text
-        elif duration == 0:
-            # Live stream
-            embed.description = "🔴 **LIVE STREAM**"
-        else:
-            embed.description = ""
-        
-        # Inline fields for metadata
-        # Field 1: Uploader
-        if channel := song_data.get('channel'):
-            embed.add_field(name="📺 Uploader", value=channel, inline=True)
-        
-        # Field 2: Duration
-        if duration and duration > 0:
-            embed.add_field(name="⏱️ Duration", value=self._format_duration(duration), inline=True)
-        elif duration == 0:
-            embed.add_field(name="⏱️ Duration", value="Live", inline=True)
-        
-        # Field 3: Requested by
-        requester = song_data.get('requester_name', song_data.get('requester', 'Unknown'))
-        embed.add_field(name="👤 Requested by", value=requester, inline=True)
-        
+        embed = discord.Embed(color=COLORS['INFO'])
+        embed.set_image(url="attachment://now_playing.png")
         return embed
     
-    def _create_progress_bar(self, current, total, length=20):
-        """Create a text-based progress bar"""
-        if not total or total <= 0:
-            return "▬" * length + " 🔴 LIVE"
-        
-        filled = int((current / total) * length)
-        filled = max(0, min(filled, length))  # Clamp between 0 and length
-        bar = "▰" * filled + "▱" * (length - filled)
-        return f"{bar} 🔊"
     
     async def update_now_playing_display(self, guild_id: int, song_data=None, start_time=None):
-        """Update the now playing embed with current song data"""
+        """Update the now playing display with dynamically generated image"""
         try:
             from utils.database import get_guild_setup
+            from utils.image_generator import create_now_playing_image
             
             logger = logging.getLogger(__name__)
             logger.info(f"Updating now playing display for guild {guild_id}")
@@ -603,12 +630,23 @@ class Music(commands.Cog):
                         try:
                             now_playing_message = await control_channel.fetch_message(guild_settings.now_playing_message_id)
                             
-                            # Generate new now playing embed
-                            embed = self._generate_now_playing_embed(song_data, start_time)
+                            # Calculate current time for progress bar
+                            current_time = 0
+                            if start_time and song_data:
+                                current_time = int((discord.utils.utcnow() - start_time).total_seconds())
                             
-                            # Update the message
-                            await now_playing_message.edit(embed=embed)
-                            logger.info(f"Successfully updated now playing embed for guild {guild_id}")
+                            # Generate the now playing image
+                            image_buffer = await create_now_playing_image(song_data, current_time)
+                            
+                            # Create Discord file from image buffer
+                            discord_file = discord.File(image_buffer, filename="now_playing.png")
+                            
+                            # Create simple embed container for the image
+                            embed = self._create_image_embed()
+                            
+                            # Update the message with new image and embed
+                            await now_playing_message.edit(embed=embed, attachments=[discord_file])
+                            logger.info(f"Successfully updated now playing image for guild {guild_id}")
                             
                         except discord.NotFound:
                             logger.warning(f"Now playing message not found for guild {guild_id}")
@@ -677,12 +715,12 @@ class Music(commands.Cog):
     
     async def _update_now_playing_loop(self, guild_id: int, song_data: dict):
         """
-        Background task that updates the now playing embed every 5 seconds
-        This implements the requirement: "This embed should be updated every 5 seconds if a song is playing to show progress"
+        Background task that updates the now playing embed every 20 seconds
+        This implements the requirement: "This embed should be updated every 20 seconds if a song is playing to show progress"
         """
         try:
             while True:
-                await asyncio.sleep(5)  # Update every 5 seconds as specified
+                await asyncio.sleep(20)  # Update every 20 seconds for better CPU performance
                 
                 # Get the start time for this guild
                 start_time = self.guild_song_start_times.get(guild_id)
@@ -1048,12 +1086,15 @@ class Music(commands.Cog):
             queue_embed = empty_queue_view._generate_queue_embed()
             
             # 2. Create the Now Playing Embed (initially showing "No song playing") as specified
-            # Use the new now playing embed generation logic
-            now_playing_embed = self._generate_now_playing_embed()
+            # Generate initial idle state image
+            from utils.image_generator import create_now_playing_image
+            idle_image_buffer = await create_now_playing_image(None, 0)
+            discord_file = discord.File(idle_image_buffer, filename="now_playing.png")
+            now_playing_embed = self._create_image_embed()
             
             # Send the embeds to the channel with the interactive view
             queue_message = await channel.send(embed=queue_embed, view=empty_queue_view)
-            now_playing_message = await channel.send(embed=now_playing_embed)
+            now_playing_message = await channel.send(embed=now_playing_embed, file=discord_file)
             
             # 3. Pin both messages to the channel as specified
             try:

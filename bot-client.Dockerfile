@@ -1,8 +1,8 @@
 FROM python:3.11-slim
 
-# Install system dependencies including FFmpeg for audio streaming
+# Install system dependencies including FFmpeg for audio streaming and fonts for image generation
 RUN apt-get update && \
-    apt-get install -y git ffmpeg && \
+    apt-get install -y git ffmpeg fonts-dejavu-core fonts-dejavu-extra && \
     apt-get clean && \
     rm -rf /var/lib/apt/lists/*
 

@@ -8,7 +8,9 @@
       "Bash(docker-compose:*)",
       "Bash(rmdir:*)",
       "Bash(python:*)",
-      "Bash(timeout 10 docker-compose -f docker-compose-services.yml logs -f bot-client)"
+      "Bash(timeout 10 docker-compose -f docker-compose-services.yml logs -f bot-client)",
+      "Bash(docker logs:*)",
+      "Bash(docker restart:*)"
     ],
     "deny": []
   }

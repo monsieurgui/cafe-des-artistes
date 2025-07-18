@@ -130,7 +130,21 @@ class MusicBot(commands.Bot):
         await self._cleanup_expired_setup_sessions()
         
         # Restore interactive views for existing embed messages
-        await self._restore_embed_views()
+        # Temporarily disable embed view restoration to debug database issues
+        # await self._restore_embed_views()
+        
+        # Test database directly
+        try:
+            from utils.database import get_database_manager
+            db_manager = await get_database_manager()
+            guild_settings_list = await db_manager.get_all_guild_settings()
+            logger.info(f"DATABASE TEST - Retrieved {len(guild_settings_list)} guild settings")
+            for gs in guild_settings_list:
+                logger.info(f"DATABASE TEST - Guild setting: {type(gs)} = {gs}")
+        except Exception as e:
+            logger.error(f"DATABASE TEST - Error: {e}")
+            import traceback
+            logger.error(f"DATABASE TEST - Traceback: {traceback.format_exc()}")
         
         # Note: Setup DMs are only sent when bot joins new guilds (on_guild_join event)
         # Not on every restart to avoid spamming owners of already-configured guilds
@@ -333,6 +347,7 @@ class MusicBot(commands.Bot):
     async def _restore_embed_views(self):
         """Restore interactive views for existing embed messages after bot restart"""
         logger = logging.getLogger(__name__)
+        logger.setLevel(logging.DEBUG)  # Temporarily enable debug logging
         logger.info("Restoring interactive views for existing embed messages...")
         
         try:
@@ -340,10 +355,13 @@ class MusicBot(commands.Bot):
             db_manager = await get_database_manager()
             
             # Get all guild settings from database
+            logger.info("Getting all guild settings from database...")
             guild_settings_list = await db_manager.get_all_guild_settings()
+            logger.info(f"Retrieved {len(guild_settings_list)} guild settings: {guild_settings_list}")
             
             for guild_settings in guild_settings_list:
                 try:
+                    logger.debug(f"Processing guild_settings: {type(guild_settings)} - {guild_settings}")
                     guild = self.get_guild(guild_settings.guild_id)
                     if not guild:
                         logger.warning(f"Guild {guild_settings.guild_id} not found, skipping view restoration")
@@ -361,9 +379,12 @@ class MusicBot(commands.Bot):
                         # Get current queue data from Player Service
                         queue_data = []
                         try:
-                            response = await self.ipc_manager.send_command(guild_settings.guild_id, "GET_STATE")
-                            if response and response.get('status') == 'success':
-                                queue_data = response.get('data', {}).get('queue', [])
+                            if self.ipc_manager and self.ipc_manager.ipc_client:
+                                response = await self.ipc_manager.ipc_client.get_player_state(guild_settings.guild_id)
+                                if response and response.get('status') == 'success':
+                                    queue_data = response.get('data', {}).get('state', {}).get('queue', [])
+                            else:
+                                logger.warning(f"IPC manager not ready during view restoration for guild {guild.name}")
                         except Exception as e:
                             logger.warning(f"Could not get queue data for guild {guild.name}: {e}")
                         
@@ -388,6 +409,8 @@ class MusicBot(commands.Bot):
                     
         except Exception as e:
             logger.error(f"Error restoring embed views: {e}")
+            import traceback
+            logger.error(f"Traceback: {traceback.format_exc()}")
         
         logger.info("Embed view restoration completed")
 

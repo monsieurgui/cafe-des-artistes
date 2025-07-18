@@ -40,7 +40,7 @@ class DatabaseManager:
     including initialization, CRUD operations, and connection management.
     """
     
-    def __init__(self, db_path: str = "data/guild_settings.db", logger: Optional[logging.Logger] = None):
+    def __init__(self, db_path: str = "/app/data/guild_settings.db", logger: Optional[logging.Logger] = None):
         """
         Initialize the database manager
         
@@ -321,38 +321,6 @@ class DatabaseManager:
                 self.logger.error(f"Failed to update message IDs for {guild_id}: {e}")
                 return False
     
-    async def get_all_guild_settings(self) -> Dict[int, GuildSettings]:
-        """
-        Get all guild settings
-        
-        Returns:
-            Dictionary mapping guild_id to GuildSettings
-        """
-        async with self._lock:
-            try:
-                async with aiosqlite.connect(self.db_path) as db:
-                    db.row_factory = aiosqlite.Row
-                    
-                    async with db.execute('''
-                        SELECT guild_id, control_channel_id, queue_message_id, now_playing_message_id
-                        FROM guild_settings
-                    ''') as cursor:
-                        
-                        rows = await cursor.fetchall()
-                        
-                        return {
-                            row['guild_id']: GuildSettings(
-                                guild_id=row['guild_id'],
-                                control_channel_id=row['control_channel_id'],
-                                queue_message_id=row['queue_message_id'],
-                                now_playing_message_id=row['now_playing_message_id']
-                            )
-                            for row in rows
-                        }
-                        
-            except Exception as e:
-                self.logger.error(f"Failed to get all guild settings: {e}")
-                return {}
     
     async def guild_exists(self, guild_id: int) -> bool:
         """
@@ -552,7 +520,7 @@ class DatabaseManager:
 _db_manager: Optional[DatabaseManager] = None
 
 
-async def get_database_manager(db_path: str = "data/guild_settings.db", 
+async def get_database_manager(db_path: str = "/app/data/guild_settings.db", 
                               logger: Optional[logging.Logger] = None) -> DatabaseManager:
     """
     Get or create the global database manager instance

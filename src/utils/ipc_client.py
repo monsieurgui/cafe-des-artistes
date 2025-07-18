@@ -297,6 +297,7 @@ class IPCManager:
             self.ipc_client.register_event_handler(Event.SONG_ENDED, self._on_song_ended)
             self.ipc_client.register_event_handler(Event.QUEUE_UPDATED, self._on_queue_updated)
             self.ipc_client.register_event_handler(Event.PLAYER_IDLE, self._on_player_idle)
+            self.ipc_client.register_event_handler(Event.PLAYER_STOP, self._on_player_stop)
             self.ipc_client.register_event_handler(Event.PLAYER_ERROR, self._on_player_error)
             self.ipc_client.register_event_handler(Event.STATE_UPDATE, self._on_state_update)
             
@@ -460,6 +461,30 @@ class IPCManager:
                 await music_cog.update_now_playing_display(guild_id, None, None)
         except Exception as e:
             self.logger.error(f"Error updating embeds for idle state: {e}")
+    
+    async def _on_player_stop(self, guild_id: int, data: Dict[str, Any]):
+        """Handle PLAYER_STOP event - stop voice playback immediately"""
+        self.logger.info(f"Player stop requested for guild {guild_id}")
+        
+        # Get the guild and voice client
+        guild = self.bot.get_guild(guild_id)
+        if not guild or not guild.voice_client:
+            self.logger.warning(f"No voice client available for guild {guild_id}")
+            return
+        
+        try:
+            # Stop any currently playing audio
+            if guild.voice_client.is_playing():
+                guild.voice_client.stop()
+                self.logger.info(f"Stopped audio playback in guild {guild_id}")
+            
+            # Stop now playing updates
+            music_cog = self.bot.get_cog('Music')
+            if music_cog:
+                await music_cog.stop_now_playing_updates(guild_id)
+                
+        except Exception as e:
+            self.logger.error(f"Error stopping player for guild {guild_id}: {e}")
     
     async def _on_player_error(self, guild_id: int, data: Dict[str, Any]):
         """Handle PLAYER_ERROR event"""

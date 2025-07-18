@@ -29,14 +29,19 @@ from typing import Optional, Dict, Any, List
 import time
 import random
 import json
+import logging
 
 from utils.constants import YTDL_OPTIONS, FFMPEG_OPTIONS, MESSAGES, COLORS
 from utils.ipc_protocol import (
     Event, create_song_started_event, create_song_ended_event,
     create_queue_updated_event, create_player_idle_event, 
-    create_player_error_event, create_state_update_event,
-    SongData, StateData
+    create_player_stop_event, create_player_error_event, 
+    create_state_update_event, SongData, StateData
 )
+from dataclasses import asdict
+
+# Set up module logger
+logger = logging.getLogger(__name__)
 
 
 class MusicPlayerService:
@@ -237,12 +242,30 @@ class MusicPlayerService:
                         
                         self._cached_urls[search_query] = info
                 
+                # Extract thumbnail - try multiple sources
+                thumbnail_url = None
+                if info.get('thumbnail'):
+                    thumbnail_url = info['thumbnail']
+                elif info.get('thumbnails') and len(info['thumbnails']) > 0:
+                    # Get the best quality thumbnail
+                    thumbnails = info['thumbnails']
+                    # Sort by width to get highest quality, fallback to first available
+                    sorted_thumbs = sorted([t for t in thumbnails if t.get('width')], 
+                                         key=lambda x: x.get('width', 0), reverse=True)
+                    if sorted_thumbs:
+                        thumbnail_url = sorted_thumbs[0].get('url')
+                    else:
+                        # Fallback to first thumbnail
+                        thumbnail_url = thumbnails[0].get('url')
+                
+                logger.info(f"Queue extraction - thumbnail URL: {thumbnail_url}")
+                
                 # Create song data
                 song_data = SongData(
                     url=info.get('webpage_url', info.get('url', search_query)),
                     title=info.get('title', 'Unknown'),
                     duration=info.get('duration', 0),
-                    thumbnail=info.get('thumbnail'),
+                    thumbnail=thumbnail_url,
                     webpage_url=info.get('webpage_url'),
                     channel=info.get('channel', info.get('uploader')),
                     view_count=info.get('view_count'),
@@ -332,13 +355,13 @@ class MusicPlayerService:
             # Clear queue
             self.queue.clear()
             
-            # Stop current playback
-            if self.voice_client and hasattr(self.voice_client, 'stop'):
-                self.voice_client.stop()
-            
+            # Reset current song
             self.current = None
             
-            # Send events
+            # Send stop event to Bot Client to stop voice playback
+            await self._send_player_stop()
+            
+            # Send other events
             await self._send_queue_update()
             await self._send_player_idle()
             
@@ -399,15 +422,31 @@ class MusicPlayerService:
                 audio_url=self.current.get('audio_url')
             )
         
+        # Convert queue songs to JSON-serializable SongData objects
+        queue_data = []
+        for song in self.queue:
+            song_data = SongData(
+                url=song.get('webpage_url', song.get('url', '')),
+                title=song.get('title', 'Unknown'),
+                duration=song.get('duration', 0),
+                thumbnail=song.get('thumbnail'),
+                webpage_url=song.get('webpage_url'),
+                channel=song.get('channel', song.get('uploader')),
+                view_count=song.get('view_count'),
+                requester_name=song.get('requester_name', song.get('requester', 'Unknown')),
+                audio_url=song.get('audio_url')
+            )
+            queue_data.append(song_data)
+        
         state = StateData(
             current_song=current_song,
-            queue=[song for song in self.queue],
+            queue=queue_data,
             is_playing=self.current is not None and self.is_connected,
             is_connected=self.is_connected,
             channel_id=self.channel_id
         )
         
-        return {"status": "success", "state": state.__dict__}
+        return {"status": "success", "state": asdict(state)}
     
     async def play_next(self):
         """Process the next song and provide audio URL to bot client"""
@@ -546,11 +585,29 @@ class MusicPlayerService:
         """Process a URL to get video information (runs in thread pool)"""
         with yt_dlp.YoutubeDL(YTDL_OPTIONS) as ydl:
             info = ydl.extract_info(url, download=False)
+            # Extract thumbnail - try multiple sources
+            thumbnail_url = None
+            if info.get('thumbnail'):
+                thumbnail_url = info['thumbnail']
+            elif info.get('thumbnails') and len(info['thumbnails']) > 0:
+                # Get the best quality thumbnail
+                thumbnails = info['thumbnails']
+                # Sort by width to get highest quality, fallback to first available
+                sorted_thumbs = sorted([t for t in thumbnails if t.get('width')], 
+                                     key=lambda x: x.get('width', 0), reverse=True)
+                if sorted_thumbs:
+                    thumbnail_url = sorted_thumbs[0].get('url')
+                else:
+                    # Fallback to first thumbnail
+                    thumbnail_url = thumbnails[0].get('url')
+            
+            logger.info(f"Extracted thumbnail URL: {thumbnail_url}")
+            
             return {
                 'url': info['url'],
                 'title': info['title'],
                 'duration': info.get('duration', 0),
-                'thumbnail': info.get('thumbnail'),
+                'thumbnail': thumbnail_url,
                 'webpage_url': info.get('webpage_url'),
                 'channel': info.get('uploader', info.get('channel')),
                 'view_count': info.get('view_count')
@@ -570,7 +627,22 @@ class MusicPlayerService:
     
     async def _send_queue_update(self):
         """Send QUEUE_UPDATED event"""
-        queue_data = [song for song in self.queue]
+        # Convert queue songs to JSON-serializable SongData objects
+        queue_data = []
+        for song in self.queue:
+            song_data = SongData(
+                url=song.get('webpage_url', song.get('url', '')),
+                title=song.get('title', 'Unknown'),
+                duration=song.get('duration', 0),
+                thumbnail=song.get('thumbnail'),
+                webpage_url=song.get('webpage_url'),
+                channel=song.get('channel', song.get('uploader')),
+                view_count=song.get('view_count'),
+                requester_name=song.get('requester_name', song.get('requester', 'Unknown')),
+                audio_url=song.get('audio_url')
+            )
+            queue_data.append(song_data)
+        
         event = create_queue_updated_event(self.guild_id, queue_data)
         await self._send_event(event.to_json())
     
@@ -582,6 +654,11 @@ class MusicPlayerService:
     async def _send_error_event(self, error_type: str, error_message: str, song_data: Optional[SongData] = None):
         """Send PLAYER_ERROR event"""
         event = create_player_error_event(self.guild_id, error_type, error_message, song_data)
+        await self._send_event(event.to_json())
+    
+    async def _send_player_stop(self):
+        """Send PLAYER_STOP event"""
+        event = create_player_stop_event(self.guild_id)
         await self._send_event(event.to_json())
     
     async def _send_state_update(self):
