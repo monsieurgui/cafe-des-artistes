@@ -17,9 +17,10 @@ logger = logging.getLogger(__name__)
 logger.setLevel(logging.INFO)
 
 # Configuration constants - Full height layout for Discord embed
-MIN_CANVAS_WIDTH = 600
-CANVAS_HEIGHT = 400  # Increased height for full embed display
-THUMBNAIL_SIZE = 400  # Full height thumbnail
+MIN_CANVAS_WIDTH = 800  # Increased for better Discord embed visibility
+IDLE_CANVAS_WIDTH = 900  # Fixed width for idle state for consistent appearance
+CANVAS_HEIGHT = 450  # Increased height for better proportions and visibility
+THUMBNAIL_SIZE = 450  # Increased to match canvas height
 BACKGROUND_COLOR = (24, 24, 27)  # Dark background similar to YouTube Music
 TEXT_COLOR_PRIMARY = (255, 255, 255)  # White for song title
 TEXT_COLOR_SECONDARY = (156, 163, 175)  # Gray for artist/metadata
@@ -28,16 +29,16 @@ PROGRESS_BAR_FG_COLOR = (239, 68, 68)  # Red for progress bar fill
 PROGRESS_BAR_HEIGHT = 8  # Slightly thicker for better visibility
 PROGRESS_BAR_Y_OFFSET = 60  # Distance from bottom
 
-# Text positioning - Adjusted for full height layout
-TEXT_AREA_X = THUMBNAIL_SIZE + 30  # Start text area after thumbnail + padding
-TITLE_Y = 80  # More space from top
-ARTIST_Y = 140  # More vertical spacing
-REQUESTER_Y = CANVAS_HEIGHT - 120  # Requested by text
-ADDED_BY_Y = CANVAS_HEIGHT - 90    # Added by text
+# Text positioning - Adjusted for larger canvas layout
+TEXT_AREA_X = THUMBNAIL_SIZE + 40  # Start text area after thumbnail + more padding
+TITLE_Y = 90  # More space from top for larger canvas
+ARTIST_Y = 150  # More vertical spacing
+REQUESTER_Y = CANVAS_HEIGHT - 130  # Requested by text
+ADDED_BY_Y = CANVAS_HEIGHT - 100   # Added by text
 
 # Progress bar positioning - Lower on canvas for better layout
-PROGRESS_BAR_Y_POS = CANVAS_HEIGHT - 50
-TIMESTAMP_Y = PROGRESS_BAR_Y_POS - 30  # Above progress bar with more space
+PROGRESS_BAR_Y_POS = CANVAS_HEIGHT - 60
+TIMESTAMP_Y = PROGRESS_BAR_Y_POS - 35  # Above progress bar with more space
 
 
 class ImageGenerator:
@@ -280,14 +281,19 @@ class ImageGenerator:
         Returns:
             BytesIO buffer containing the generated PNG image
         """
-        # Calculate dynamic width based on title length (using larger font)
-        canvas_width = MIN_CANVAS_WIDTH
-        if song_data and song_data.get('title'):
-            title_font = self._get_font(36, bold=True)  # Use same font size as actual title
-            title_bbox = title_font.getbbox(song_data['title'])
-            title_width = title_bbox[2] - title_bbox[0]
-            required_width = TEXT_AREA_X + title_width + 50  # Add more padding for larger text
-            canvas_width = max(MIN_CANVAS_WIDTH, required_width)
+        # Calculate width - fixed width for idle state, dynamic for playing
+        if song_data is None:
+            # Use fixed width for idle state for consistent appearance
+            canvas_width = IDLE_CANVAS_WIDTH
+        else:
+            # Calculate dynamic width based on title length for playing state
+            canvas_width = MIN_CANVAS_WIDTH
+            if song_data.get('title'):
+                title_font = self._get_font(36, bold=True)  # Use same font size as actual title
+                title_bbox = title_font.getbbox(song_data['title'])
+                title_width = title_bbox[2] - title_bbox[0]
+                required_width = TEXT_AREA_X + title_width + 60  # Add more padding for larger text
+                canvas_width = max(MIN_CANVAS_WIDTH, required_width)
         
         # Create the base canvas with dynamic width
         image = Image.new('RGB', (canvas_width, CANVAS_HEIGHT), BACKGROUND_COLOR)
