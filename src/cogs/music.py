@@ -397,9 +397,16 @@ class Music(commands.Cog):
         try:
             from utils.embeds import success, warning, error
             
-            # First, stop any currently playing audio on the bot client
+            # First, safely stop any currently playing audio on the bot client
             if interaction.guild.voice_client and interaction.guild.voice_client.is_playing():
-                interaction.guild.voice_client.stop()
+                try:
+                    interaction.guild.voice_client.stop()
+                    # Wait a moment for the stop to take effect
+                    await asyncio.sleep(0.2)
+                except Exception as e:
+                    # Log but don't fail if stopping fails
+                    logger = logging.getLogger(__name__)
+                    logger.warning(f"Error stopping voice client in guild {interaction.guild.id}: {e}")
             
             # Then send skip command to player service
             result = await self.bot.ipc_manager.ipc_client.skip_song(interaction.guild.id)

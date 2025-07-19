@@ -189,6 +189,22 @@ class PlayerServiceApp:
             elif command == Command.SKIP_SONG:
                 result = await player.skip()
             elif command == Command.PLAY_NEXT:
+                # Send SONG_ENDED event for current song before clearing it
+                if player.current:
+                    from utils.ipc_protocol import SongData, create_song_ended_event
+                    current_song_data = SongData(
+                        url=player.current['url'],
+                        title=player.current['title'],
+                        duration=player.current.get('duration', 0),
+                        thumbnail=player.current.get('thumbnail'),
+                        webpage_url=player.current.get('webpage_url'),
+                        channel=player.current.get('channel'),
+                        view_count=player.current.get('view_count'),
+                        requester_name=player.current.get('requester_name', 'Unknown'),
+                        audio_url=player.current.get('audio_url')
+                    )
+                    await player._send_song_ended(current_song_data)
+                
                 # Clear current song and play next from queue
                 player.current = None
                 await player.play_next()

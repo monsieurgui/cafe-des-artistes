@@ -473,10 +473,15 @@ class IPCManager:
             return
         
         try:
-            # Stop any currently playing audio
+            # Safely stop any currently playing audio
             if guild.voice_client.is_playing():
-                guild.voice_client.stop()
-                self.logger.info(f"Stopped audio playback in guild {guild_id}")
+                try:
+                    guild.voice_client.stop()
+                    self.logger.info(f"Stopped audio playback in guild {guild_id}")
+                    # Wait a moment for the stop to take effect
+                    await asyncio.sleep(0.2)
+                except Exception as e:
+                    self.logger.warning(f"Error stopping voice client in guild {guild_id}: {e}")
             
             # Stop now playing updates
             music_cog = self.bot.get_cog('Music')
@@ -501,6 +506,21 @@ class IPCManager:
     async def _handle_audio_finished(self, guild_id: int):
         """Handle when audio finishes naturally - tell player service to play next"""
         try:
+            # Add a small delay to let voice client transition to a stable state
+            await asyncio.sleep(0.5)
+            
+            # Ensure voice client is in a stable state before sending commands
+            guild = self.bot.get_guild(guild_id)
+            if guild and guild.voice_client:
+                # Wait for voice client to not be playing before proceeding
+                max_wait = 5  # Maximum 5 seconds
+                wait_time = 0
+                while guild.voice_client.is_playing() and wait_time < max_wait:
+                    await asyncio.sleep(0.1)
+                    wait_time += 0.1
+                
+                self.logger.info(f"Voice client stable for guild {guild_id}, telling player service to play next")
+            
             # Tell player service to play next song (without skip logic)
             await self.ipc_client.play_next(guild_id)
         except Exception as e:
