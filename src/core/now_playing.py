@@ -4,12 +4,13 @@ from datetime import datetime
 from utils.constants import COLORS
 
 class NowPlayingDisplay:
-    def __init__(self, ctx, song_info):
+    def __init__(self, ctx, song_info, voice_client=None):
         self.ctx = ctx
         self.song_info = song_info
-        self.start_time = datetime.utcnow()
+        self.start_time = discord.utils.utcnow()  # Fixed timezone issue
         self.message = None
         self.update_task = None
+        self.voice_client = voice_client
         
     def _format_duration(self, seconds):
         """Format duration as MM:SS or HH:MM:SS"""
@@ -28,7 +29,9 @@ class NowPlayingDisplay:
         if not total:
             return "▬" * length + " 🔴 LIVE"
             
-        filled = int((current / total) * length)
+        # Clamp to [0, length] to avoid overflow when elapsed > duration
+        ratio = 0 if total <= 0 else current / total
+        filled = max(0, min(length, int(ratio * length)))
         bar = "▰" * filled + "▱" * (length - filled)
         return f"{bar} 🔊"
         
@@ -42,7 +45,7 @@ class NowPlayingDisplay:
         
         # Duration and progress
         duration = self.song_info.get('duration', 0)
-        current_time = (datetime.utcnow() - self.start_time).total_seconds()
+        current_time = (discord.utils.utcnow() - self.start_time).total_seconds()
         
         if duration:
             progress = (
@@ -75,9 +78,13 @@ class NowPlayingDisplay:
             print(f"Error starting now playing display: {e}")
             
     async def _update_display(self):
-        """Update the now playing display every 5 seconds"""
+        """Update the now playing display with state validation"""
         try:
-            while True:
+            while self.should_continue():
+                if not self.is_playing():
+                    await self.stop()
+                    break
+                    
                 await asyncio.sleep(5)
                 if self.message:
                     try:
@@ -89,6 +96,22 @@ class NowPlayingDisplay:
                         break
         except asyncio.CancelledError:
             pass
+            
+    def should_continue(self):
+        """Check if display should continue updating"""
+        # Validate voice client exists and is playing
+        if not self.voice_client or not self.voice_client.is_connected():
+            return False
+        # Check if message still exists    
+        if not self.message:
+            return False
+        return True
+        
+    def is_playing(self):
+        """Check if voice client is actually playing audio"""
+        return (self.voice_client and 
+                self.voice_client.is_connected() and 
+                self.voice_client.is_playing())
             
     async def stop(self):
         """Stop updating and remove the display"""

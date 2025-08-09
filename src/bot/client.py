@@ -2,9 +2,10 @@ import sys
 import traceback
 import discord
 from discord.ext import commands
-import yt_dlp
 from utils.config import load_config
 from utils.constants import YTDL_OPTIONS, MESSAGES, COLORS
+from core.voice_manager import VoiceConnectionManager, ConnectionMonitor
+from core.event_handlers import VoiceEventHandlers, BotEventHandlers
 import logging
 
 class MusicBot(commands.Bot):
@@ -48,11 +49,16 @@ class MusicBot(commands.Bot):
             help_command=None
         )
         
-        # Initialize YouTube-DL with optimized options
-        self.ytdl = yt_dlp.YoutubeDL(YTDL_OPTIONS)
-        
         # Storage for music players per server
         self.music_players = {}
+        
+        # Initialize voice connection manager
+        self.voice_manager = VoiceConnectionManager(self)
+        self.connection_monitor = ConnectionMonitor(self.voice_manager)
+        
+        # Initialize event handlers
+        self.voice_event_handler = VoiceEventHandlers(self)
+        self.bot_event_handler = BotEventHandlers(self)
         
         # Configure logging - use a safer way to get log level
         try:
@@ -69,13 +75,12 @@ class MusicBot(commands.Bot):
     async def setup_hook(self):
         """Configure bot extensions on startup"""
         await self.load_extension('cogs.music')
+        # Start voice connection monitoring
+        self.connection_monitor.start_monitoring()
 
     async def on_ready(self):
         """Called when the bot is ready and connected"""
-        logger = logging.getLogger(__name__)
-        logger.info(f"Bot connected as {self.user}")
-        logger.info(f"Bot ID: {self.user.id}")
-        logger.info("Bot ready to receive commands!")
+        await self.bot_event_handler.on_ready()
         
         # Set bot activity
         activity = discord.Activity(
@@ -85,45 +90,16 @@ class MusicBot(commands.Bot):
         await self.change_presence(activity=activity)
 
     async def on_voice_state_update(self, member, before, after):
-        """
-        Gère les changements d'état vocal des membres.
-        
-        Cette méthode surveille :
-        - Les déconnexions des membres
-        - Les changements de canal
-        - L'isolement du bot
-        
-        Args:
-            member (Member): Le membre dont l'état a changé
-            before (VoiceState): État vocal précédent
-            after (VoiceState): Nouvel état vocal
-            
-        Notes:
-            - Déconnecte automatiquement le bot s'il est seul
-            - Gère le nettoyage des ressources lors de la déconnexion
-        """
-        # ... code existant ...
+        """Handle voice state updates for reconnection and monitoring"""
+        await self.voice_event_handler.on_voice_state_update(member, before, after)
 
     async def on_command_error(self, ctx, error):
-        """Global command error handler"""
-        if isinstance(error, commands.CommandInvokeError):
-            error = error.original
-        
-        if isinstance(error, ValueError):
-            embed = discord.Embed(
-                title=MESSAGES['ERROR_TITLE'],
-                description=str(error),
-                color=COLORS['ERROR']
-            )
-            await ctx.send(embed=embed, delete_after=10)
-        elif self.config.get('debug', False):
-            # In debug mode, show full error traceback
-            traceback.print_exception(type(error), error, error.__traceback__)
+        """Handle command errors"""
+        await self.bot_event_handler.on_command_error(ctx, error)
 
     async def on_error(self, event_method: str, *args, **kwargs):
-        """Global event error handler"""
-        print(f'Error in {event_method}:', file=sys.stderr)
-        traceback.print_exc()
+        """Handle general bot errors"""
+        await self.bot_event_handler.on_error(event_method, *args, **kwargs)
 
     def run(self):
         """Run the bot with the configured token"""

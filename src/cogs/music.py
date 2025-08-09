@@ -99,8 +99,8 @@ class Music(commands.Cog):
         """Quitte le canal vocal et vide la file d'attente"""
         player = self.get_music_player(ctx)
         
-        # Vide la file d'attente
-        player.queue.clear()
+        # Vide la file d'attente via le gestionnaire
+        player.queue_manager.queue.clear()
         
         # Arrête la lecture en cours s'il y en a une
         if player.voice_client and player.voice_client.is_playing():
@@ -195,7 +195,7 @@ class Music(commands.Cog):
             status_msg = await ctx.send(MESSAGES['CLEANUP_START'])
             
             # Clear queue and stop playback
-            player.queue.clear()
+            player.queue_manager.queue.clear()
             if player.voice_client and player.voice_client.is_playing():
                 player.voice_client.stop()
             

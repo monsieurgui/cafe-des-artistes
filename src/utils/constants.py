@@ -1,30 +1,25 @@
 import subprocess
 
-# Configuration YT-DLP
+# Configuration YT-DLP - Modernized and reduced to valid, stable options
 YTDL_OPTIONS = {
-    'format': 'bestaudio/best',
+    'format': 'bestaudio[acodec=opus]/bestaudio/best',
     'quiet': True,
     'no_warnings': True,
     'skip_download': True,
-    'force_generic_extractor': False,
-    'socket_timeout': 10,
-    'retries': 3,
+    'extract_flat': False,
     'nocheckcertificate': False,
+    'prefer_free_formats': True,
+    'socket_timeout': 30,
+    'retries': 5,
     'noplaylist': True,
-    'concurrent_fragment_downloads': 1,
-    'buffersize': 32768,
     'postprocessors': [],
     'cachedir': False,
     'writethumbnail': False,
     'writesubtitles': False,
     'writeautomaticsub': False,
-    'get_duration': True,
-    'extract_metadata': True,
     'default_search': 'ytsearch',
-    'source_address': '0.0.0.0',
     'ignoreerrors': True,
-    'no_color': True,
-    'extract_flat': 'in_playlist'
+    'no_color': True
 }
 
 # Configuration YT-DLP pour le téléchargement
@@ -44,27 +39,31 @@ YTDL_DOWNLOAD_OPTIONS = {
 }
 
 YTDL_OPTIONS_LIVE = {
-    'format': 'bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best',
+    'format': 'bestaudio[acodec=opus]/bestaudio[ext=m4a]/bestaudio/best[ext=mp4]/best',
     'noplaylist': True,
-    'nocheckcertificate': True,
+    'nocheckcertificate': False,
+    'prefer_free_formats': True,
     'ignoreerrors': False,
     'quiet': True,
     'no_warnings': True,
     'extract_flat': False,
     'lazy_playlist': False,
     'postprocessor_hooks': [],
-    'concurrent_fragment_downloads': 3,
-    'live_from_start': True,
-    'wait_for_video': True,
-    'source_address': '0.0.0.0',
-    'is_live': True,
-    'live_buffer': 1800,
+    'socket_timeout': 30,
+    'retries': 5,
 }
 
-# Configuration FFMPEG
+# Configuration FFMPEG - Modernized for improved stability
 FFMPEG_OPTIONS = {
-    'before_options': '-reconnect 1 -reconnect_streamed 1 -reconnect_delay_max 5 -thread_queue_size 4096',
-    'options': '-vn -ar 48000 -ac 2 -f s16le -acodec pcm_s16le -flags low_delay -threads 1'
+    'before_options': (
+        '-reconnect 1 '
+        '-reconnect_streamed 1 '
+        '-reconnect_delay_max 5 '
+        '-analyzeduration 0 '
+        '-loglevel error '
+        '-nostats '
+    ),
+    'options': '-vn'
 }
 
 # Couleurs des Embeds Discord
