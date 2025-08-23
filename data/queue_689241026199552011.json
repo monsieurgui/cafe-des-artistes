@@ -1,0 +1,14 @@
+{
+  "guild_id": 689241026199552011,
+  "timestamp": 1754713730.7829356,
+  "current_song": {
+    "url": "https://www.youtube.com/watch?v=t_9b1dTlXOQ",
+    "title": "Naruto OST - Jiraiya Theme",
+    "duration": 160,
+    "needs_processing": true
+  },
+  "queue": [],
+  "metadata": {
+    "disconnect_time": 1344613.5256932
+  }
+}

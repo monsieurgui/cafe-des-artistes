@@ -12,7 +12,7 @@ import zmq
 import zmq.asyncio
 import json
 import logging
-from typing import Dict, Any, Optional, Callable
+from typing import Dict, Any, Optional, Callable, Tuple
 from utils.ipc_protocol import (
     Command, Event, CommandMessage, EventMessage, IPCMessage,
     BOT_CLIENT_CONFIG, create_connect_command, create_disconnect_command,
@@ -29,7 +29,7 @@ class IPCClient:
     interface for sending commands and receiving events.
     """
     
-    def __init__(self, logger: Optional[logging.Logger] = None):
+    def __init__(self, logger: Optional[logging.Logger] = None, bot=None):
         """
         Initialize the IPC Client
         
@@ -37,12 +37,16 @@ class IPCClient:
             logger: Logger instance for debugging
         """
         self.logger = logger or logging.getLogger(__name__)
+        self.bot = bot
         self.context = None
         self.command_socket = None
         self.event_socket = None
         self.event_handlers: Dict[str, Callable] = {}
         self.event_listener_task = None
         self.connected = False
+        # Track last command channel and per-song start message for deletion
+        self.last_command_channel_by_guild: Dict[int, int] = {}
+        self.song_message_by_guild: Dict[int, Tuple[int, int]] = {}
         
     async def connect(self):
         """Initialize ZeroMQ connections to Player Service"""
@@ -220,6 +224,72 @@ class IPCClient:
         self.event_handlers[event_type.value] = handler
         self.logger.debug(f"Registered handler for event type: {event_type.value}")
     
+    # Helper methods for Start-of-Song Beacon
+    def update_last_command_channel(self, guild_id: int, channel_id: int) -> None:
+        """Store the most recent channel where a command was issued for a guild."""
+        self.last_command_channel_by_guild[guild_id] = channel_id
+        self.logger.debug(f"Updated last command channel for guild {guild_id} -> {channel_id}")
+    
+    async def _post_start_of_song_message(self, guild_id: int, song_data: Dict[str, Any]) -> None:
+        """Post the start-of-song embed with ASCII time in the last command channel."""
+        try:
+            # Determine channel
+            channel_id = self.last_command_channel_by_guild.get(guild_id)
+            if not channel_id:
+                self.logger.warning(f"No last command channel stored for guild {guild_id}; not posting song beacon")
+                return
+            channel = self.bot.get_channel(channel_id)
+            if channel is None:
+                self.logger.warning(f"Channel {channel_id} not found for guild {guild_id}")
+                return
+            
+            # Build embed
+            import discord
+            from utils.constants import COLORS
+            from utils.ascii_time import render_ascii_time
+            now_ascii = render_ascii_time()
+            title = song_data.get('title', 'Unknown')
+            embed = discord.Embed(
+                title=f"**{title}**",
+                description=f"```text\n{now_ascii}\n```",
+                color=COLORS['INFO'],
+                timestamp=discord.utils.utcnow()
+            )
+            # Optionally add URL
+            url = song_data.get('webpage_url') or song_data.get('url')
+            if url:
+                embed.url = url
+            
+            message = await channel.send(embed=embed)
+            self.song_message_by_guild[guild_id] = (channel_id, message.id)
+            self.logger.info(f"Posted start-of-song beacon in guild {guild_id} channel {channel_id}")
+        except Exception as e:
+            self.logger.error(f"Failed to post start-of-song message for guild {guild_id}: {e}")
+    
+    async def _delete_start_of_song_message(self, guild_id: int) -> None:
+        """Delete the previously posted start-of-song embed for a guild if it exists."""
+        try:
+            info = self.song_message_by_guild.get(guild_id)
+            if not info:
+                return
+            channel_id, message_id = info
+            channel = self.bot.get_channel(channel_id)
+            if channel is None:
+                # Clear tracking if channel not found
+                self.song_message_by_guild.pop(guild_id, None)
+                return
+            import discord
+            try:
+                message = await channel.fetch_message(message_id)
+                await message.delete()
+                self.logger.info(f"Deleted start-of-song beacon in guild {guild_id}")
+            except discord.NotFound:
+                pass
+            finally:
+                self.song_message_by_guild.pop(guild_id, None)
+        except Exception as e:
+            self.logger.error(f"Failed to delete start-of-song message for guild {guild_id}: {e}")
+    
     # Command methods
     
     async def connect_to_voice(self, guild_id: int, channel_id: int, token: str, 
@@ -283,7 +353,7 @@ class IPCManager:
         """
         self.bot = bot
         self.logger = logger or logging.getLogger(__name__)
-        self.ipc_client = IPCClient(logger)
+        self.ipc_client = IPCClient(logger, bot)
         self.voice_states: Dict[int, Dict[str, Any]] = {}
         
     async def initialize(self):
@@ -394,29 +464,28 @@ class IPCManager:
             audio_source = FFmpegPCMAudio(audio_url, **ffmpeg_options)
             
             def after_playing(error):
+                # Always advance to next track, even if FFmpeg reports an error
                 if error:
-                    self.logger.error(f"Audio playback error in guild {guild_id}: {error}")
+                    self.logger.warning(f"Audio playback ended with error in guild {guild_id}: {error}")
                 else:
                     self.logger.info(f"Audio finished playing in guild {guild_id}")
-                    # When audio finishes naturally, tell player service to play next
-                    # Use the bot's event loop to schedule the coroutine
-                    try:
-                        bot_loop = self.bot.loop
-                        if bot_loop and not bot_loop.is_closed():
-                            asyncio.run_coroutine_threadsafe(self._handle_audio_finished(guild_id), bot_loop)
-                        else:
-                            self.logger.warning(f"Bot event loop not available for guild {guild_id}")
-                    except Exception as e:
-                        self.logger.error(f"Error scheduling audio finished handler: {e}")
+                # Tell player service to play next using the bot's event loop
+                try:
+                    bot_loop = self.bot.loop
+                    if bot_loop and not bot_loop.is_closed():
+                        asyncio.run_coroutine_threadsafe(self._handle_audio_finished(guild_id), bot_loop)
+                    else:
+                        self.logger.warning(f"Bot event loop not available for guild {guild_id}")
+                except Exception as e:
+                    self.logger.error(f"Error scheduling audio finished handler: {e}")
             
             # Start streaming audio to Discord
             guild.voice_client.play(audio_source, after=after_playing)
             self.logger.info(f"Started streaming audio for guild {guild_id}")
             
-            # Update Now Playing embed via Music cog
-            music_cog = self.bot.get_cog('Music')
-            if music_cog:
-                await music_cog.start_now_playing_updates(guild_id, data)
+            # Post Start-of-Song beacon
+            await self._delete_start_of_song_message(guild_id)
+            await self._post_start_of_song_message(guild_id, data)
                 
         except Exception as e:
             self.logger.error(f"Error starting audio playback: {e}")
@@ -424,43 +493,21 @@ class IPCManager:
     async def _on_song_ended(self, guild_id: int, data: Dict[str, Any]):
         """Handle SONG_ENDED event"""
         self.logger.info(f"Song ended in guild {guild_id}: {data.get('title', 'Unknown')}")
-        
-        # Stop now playing updates since song ended
-        try:
-            music_cog = self.bot.get_cog('Music')
-            if music_cog:
-                await music_cog.stop_now_playing_updates(guild_id)
-        except Exception as e:
-            self.logger.error(f"Error stopping now playing updates: {e}")
+        # Delete beacon
+        await self._delete_start_of_song_message(guild_id)
     
     async def _on_queue_updated(self, guild_id: int, data: Dict[str, Any]):
         """Handle QUEUE_UPDATED event"""
         queue = data.get('queue', [])
         queue_size = len(queue)
         self.logger.info(f"Queue updated in guild {guild_id}: {queue_size} songs")
-        
-        # Update Queue embed via Music cog
-        try:
-            music_cog = self.bot.get_cog('Music')
-            if music_cog:
-                await music_cog.update_queue_display(guild_id, queue)
-        except Exception as e:
-            self.logger.error(f"Error updating queue display: {e}")
+        # No persistent queue UI to update
     
     async def _on_player_idle(self, guild_id: int, data: Dict[str, Any]):
         """Handle PLAYER_IDLE event"""
         self.logger.info(f"Player idle in guild {guild_id}")
-        
-        # Update embeds to show idle state
-        try:
-            music_cog = self.bot.get_cog('Music')
-            if music_cog:
-                # Stop now playing updates
-                await music_cog.stop_now_playing_updates(guild_id)
-                # Update to show no song playing
-                await music_cog.update_now_playing_display(guild_id, None, None)
-        except Exception as e:
-            self.logger.error(f"Error updating embeds for idle state: {e}")
+        # Delete beacon
+        await self._delete_start_of_song_message(guild_id)
     
     async def _on_player_stop(self, guild_id: int, data: Dict[str, Any]):
         """Handle PLAYER_STOP event - stop voice playback immediately"""
@@ -483,10 +530,8 @@ class IPCManager:
                 except Exception as e:
                     self.logger.warning(f"Error stopping voice client in guild {guild_id}: {e}")
             
-            # Stop now playing updates
-            music_cog = self.bot.get_cog('Music')
-            if music_cog:
-                await music_cog.stop_now_playing_updates(guild_id)
+            # Delete beacon
+            await self._delete_start_of_song_message(guild_id)
                 
         except Exception as e:
             self.logger.error(f"Error stopping player for guild {guild_id}: {e}")
@@ -496,7 +541,8 @@ class IPCManager:
         error_type = data.get('error_type', 'unknown')
         error_message = data.get('error_message', 'Unknown error')
         self.logger.error(f"Player error in guild {guild_id} ({error_type}): {error_message}")
-        # TODO: Send error message to guild's channel
+        # Delete beacon on error
+        await self._delete_start_of_song_message(guild_id)
     
     async def _on_state_update(self, guild_id: int, data: Dict[str, Any]):
         """Handle STATE_UPDATE event"""

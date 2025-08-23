@@ -53,15 +53,22 @@ A feature-rich Discord music bot with high-quality playback and performance opti
 - Performance optimizations
 - Playlist support
 - Loop mode
+- Per-song start message (beacon) with ASCII time and timestamp
+- On-demand `/queue` snapshot (top 20)
 - And more!
 
-## Commands
-- `!p` or `!play`: Play a song or add to queue
-- `!s` or `!skip`: Skip current song
-- `!q` or `!queue`: Show current queue
-- `!l` or `!loop`: Toggle loop mode
-- `!live`: Start a live stream
-- Check `!help` for more commands
+## Commands (Slash)
+- `/play` query: Play a song or add to queue
+- `/skip`: Skip current song
+- `/queue`: Show a public snapshot of up to 20 upcoming items
+- `/p5` query: Add the same song 5 times
+- `/leave`: Disconnect the bot from voice
+- `/reset`: Clear the queue and stop playback
+- `/support` message: DM the owner for support
+
+Notes:
+- There is no `/setup` command; no persistent control panel is used.
+- A start-of-song embed (beacon) is posted on each new track and deleted on end/skip/reset/error.
 
 ## Development vs Production
 - Development: Uses local Python environment with hot-reloading

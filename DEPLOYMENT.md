@@ -6,8 +6,8 @@ This guide covers deploying the Café des Artistes Discord bot using the new two
 
 The bot is now split into two containerized services:
 
-- **bot-client**: Lightweight Discord interface that handles user interactions
-- **player-service**: Headless audio processing service with FFmpeg
+- **bot-client**: Lightweight Discord interface that handles user interactions and streams audio to Discord
+- **player-service**: Headless audio processing service that manages the queue and extracts audio URLs with FFmpeg (no Discord voice client)
 
 Both services communicate via ZeroMQ IPC over a custom Docker network.
 
@@ -26,29 +26,29 @@ Both services communicate via ZeroMQ IPC over a custom Docker network.
 
 2. **Deploy Services**:
    ```bash
-   docker-compose -f docker-compose-services.yml up -d
+   docker-compose up -d
    ```
 
 3. **Check Logs**:
    ```bash
    # Bot client logs
-   docker-compose -f docker-compose-services.yml logs -f bot-client
+   docker-compose logs -f bot-client
    
    # Player service logs
-   docker-compose -f docker-compose-services.yml logs -f player-service
+   docker-compose logs -f player-service
    ```
 
 ## Service Configuration
 
 ### Bot Client Service
 - **Image**: Built from `bot-client.Dockerfile`
-- **Purpose**: Discord gateway connection and user interaction
+- **Purpose**: Discord gateway connection, user interaction, and streaming audio to Discord
 - **Dependencies**: No FFmpeg (lightweight)
 - **Network**: Connects to `player-service` via hostname
 
 ### Player Service
 - **Image**: Built from `player-service.Dockerfile`
-- **Purpose**: Audio processing and voice channel management
+- **Purpose**: Audio processing, queue management, and audio URL extraction (no Discord gateway/voice)
 - **Dependencies**: Includes FFmpeg for audio processing
 - **Ports**: Exposes 5555 (commands) and 5556 (events) for IPC
 
@@ -59,8 +59,8 @@ Both services communicate via ZeroMQ IPC over a custom Docker network.
 │   bot-client    │◄────────────────►│ player-service  │
 │                 │  tcp://player-   │                 │
 │ - Discord API   │  service:5555/56 │ - Audio Engine  │
-│ - User Commands │                  │ - Voice Client  │
-│ - UI Updates    │                  │ - FFmpeg        │
+│ - Streams Audio │                  │ - FFmpeg URL    │
+│ - UI Updates    │                  │   Extraction    │
 └─────────────────┘                  └─────────────────┘
          │                                    │
          └──────────────┬─────────────────────┘
@@ -88,23 +88,23 @@ Both services communicate via ZeroMQ IPC over a custom Docker network.
 
 ```bash
 # Build only
-docker-compose -f docker-compose-services.yml build
+docker-compose build
 
 # Build without cache
-docker-compose -f docker-compose-services.yml build --no-cache
+docker-compose build --no-cache
 
 # Start in foreground
-docker-compose -f docker-compose-services.yml up
+docker-compose up
 
 # Stop services
-docker-compose -f docker-compose-services.yml down
+docker-compose down
 
 # View service status
-docker-compose -f docker-compose-services.yml ps
+docker-compose ps
 
 # Execute shell in container
-docker-compose -f docker-compose-services.yml exec bot-client /bin/bash
-docker-compose -f docker-compose-services.yml exec player-service /bin/bash
+docker-compose exec bot-client /bin/bash
+docker-compose exec player-service /bin/bash
 ```
 
 ## Troubleshooting
@@ -118,23 +118,23 @@ docker-compose -f docker-compose-services.yml exec player-service /bin/bash
 
 2. Verify hostname resolution:
    ```bash
-   docker-compose -f docker-compose-services.yml exec bot-client ping player-service
+   docker-compose exec bot-client ping player-service
    ```
 
 3. Check IPC port connectivity:
    ```bash
-   docker-compose -f docker-compose-services.yml exec bot-client telnet player-service 5555
+   docker-compose exec bot-client telnet player-service 5555
    ```
 
 ### Audio Issues
 1. Verify FFmpeg in player service:
    ```bash
-   docker-compose -f docker-compose-services.yml exec player-service ffmpeg -version
+   docker-compose exec player-service ffmpeg -version
    ```
 
 2. Check voice connection logs:
    ```bash
-   docker-compose -f docker-compose-services.yml logs player-service | grep -i voice
+   docker-compose logs player-service | grep -i voice
    ```
 
 ## Success Criteria
@@ -143,9 +143,9 @@ The deployment is successful when:
 
 ✅ Both services start without errors
 ✅ Bot appears online in Discord
-✅ `/play` command triggers audio processing in player-service
-✅ All music commands (`/skip`, `/leave`, `/reset`) work correctly
-✅ Persistent embeds update based on player-service events
+✅ `/play` triggers audio processing in player-service
+✅ All music commands (`/skip`, `/leave`, `/reset`, `/queue`, `/p5`, `/support`) work correctly
+✅ Start-of-song beacon message is created on song start and deleted on end/skip/reset/error (no persistent control panel)
 ✅ Restarting player-service doesn't crash bot-client
 
 ## Monitoring
@@ -154,11 +154,16 @@ Monitor service health:
 
 ```bash
 # Service status
-docker-compose -f docker-compose-services.yml ps
+docker-compose ps
 
 # Resource usage
 docker stats cafe-bot-client cafe-player-service
 
 # Real-time logs
-docker-compose -f docker-compose-services.yml logs -f
+docker-compose logs -f
 ```
+
+## UX Notes
+
+- The bot no longer uses a persistent control panel. Instead, a start-of-song beacon embed is posted at the beginning of each track and deleted automatically when the track ends, is skipped, the player is reset, or an error occurs.
+- Use `/queue` to post a one-off public snapshot of up to the next 20 tracks.

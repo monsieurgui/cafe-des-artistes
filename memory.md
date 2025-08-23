@@ -1098,3 +1098,72 @@ await message.edit(embed=embed, attachments=[discord_file])
 - ✅ Ready for production testing of dynamic image updates
 
 **Architecture Status:** Epic 7 User Story 7.2 is complete. The bot's real-time update loop now generates and displays dynamic images every 5 seconds instead of text-based embeds. The "Now Playing" display now uses a single, wide image that is generated and updated in real-time, providing the YouTube Music UI experience as specified in the plan. All text-based embed logic has been replaced with the image generation system.
+
+---
+
+### Planning Note - Replace Persistent UI with Start-of-Song Embed and Add /queue Snapshot
+
+**Summary:** Planned a UX shift to remove `/setup`, Now Playing, and Queue persistent embeds. On every song start, the bot will post a transient embed featuring the song title and an ASCII-rendered current time, then delete it when the song ends. Added `/queue` for an on-demand, single-embed snapshot (top 20).
+
+**Key Decisions:**
+- Remove `/setup` and all persistent embed/view restoration logic; no startup restoration.
+- Start-of-song embed: bold title = song name; description contains ASCII HH:MM:SS and embed timestamp; tracked per-guild for deletion on end/skip/reset/error.
+- Add `/queue` command that publicly shows up to 20 upcoming items with links, duration, requester.
+- Introduce `pyfiglet` for ASCII time; small utility module `utils/ascii_time.py`.
+- Defer DB migrations; ignore deprecated message ID fields at runtime.
+
+**Validation:** Docker build/run remains green; tests to cover ASCII renderer and `/queue` formatting; event-driven deletion path verified across end/skip/reset/error.
+
+---
+
+### Story Execution - Start-of-Song Beacon and Queue Snapshot Implemented
+
+✅ Removed persistent UI and setup flows:
+- Deprecated `/setup` command and DM-based setup/session flows in bot client
+- Removed startup restoration and persistent embed update paths
+
+✅ Implemented Start-of-Song Beacon:
+- Added `pyfiglet` and created `utils/ascii_time.py` (`render_ascii_time`)
+- On `SONG_STARTED`, bot posts an embed in the last command channel with bold title and ASCII time code block, timestamped to now
+- Tracked per-guild posted message and delete it on `SONG_ENDED`, `PLAYER_STOP`, idle, or error
+
+✅ Public `/queue` snapshot:
+- New `/queue` builds a single public embed with up to 20 upcoming items including link, duration and requester
+
+📦 Files touched:
+- `src/requirements.txt` (+pyfiglet)
+- `src/utils/ascii_time.py` (new)
+- `src/utils/ipc_client.py` (beacon post/delete, track last command channel; prune persistent UI updates)
+- `src/cogs/music.py` (track last channel in commands; new `/queue` snapshot; removed persistent UI handlers)
+- `src/bot/client.py` (removed setup/restore logic)
+
+📝 Plan updated in `plan.md` for Acts I–III as completed.
+
+### Act IV Progress - Refactors and Tests
+
+✅ Removed legacy persistent UI code paths:
+- Stripped `QueueView` and `NowPlayingDisplay` usage from `src/core/music_player.py`
+- Left legacy file stubs in place without imports to avoid accidental use
+
+✅ Added unit test:
+- `src/tests/test_ascii_time.py` validates `render_ascii_time()` output shape
+
+🔜 Next:
+- Add `/queue` formatting tests; update README/DEPLOYMENT/MESSAGE_CATALOG to reflect new UX
+ 
+#### Update — Tests and Docs Completed (Act IV)
+
+✅ Added `/queue` snapshot tests:
+- `src/tests/test_queue_snapshot.py` now covers empty queue, top 20 limit with footer, and fewer-than-20 without footer.
+
+✅ Added start-of-song beacon lifecycle test:
+- `src/tests/test_beacon_lifecycle.py` verifies posting and deletion of the beacon message using fakes.
+
+✅ Deployment docs updated:
+- `DEPLOYMENT.md` updated to use `docker-compose.yml`, clarified bot-client streams audio while player-service extracts URLs, and added UX notes that there is no persistent control panel (start-of-song beacon + `/queue` snapshot).
+
+📌 Plan updated:
+- Checked off Act IV items for queue tests, ASCII time test, beacon lifecycle test, and deployment docs.
+
+Next steps:
+- Update `README.md` and `MESSAGE_CATALOG.md` to reflect the new UX fully.

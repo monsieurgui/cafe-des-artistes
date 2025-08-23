@@ -54,27 +54,13 @@ This document catalogs all existing user-facing messages in the Cafe des Artiste
 - Success: `✅ The player has been reset. The queue is now empty.`
 - Error: `❌ Failed to reset the player.`
 
-### `/setup` Command
-**Current Messages:**
-- Permission Error: "You need Administrator permissions to use this command."
-- Already Setup: "This server is already set up! The control panel is active."
-- DM Success: "📨 I've sent you a DM with setup instructions. Please check your direct messages!"
-- DM Error: "I couldn't send you a DM. Please enable DMs from server members and try again."
-
-**Proposed Ephemeral Messages:**
-- Permission Error: `❌ You do not have the required permissions to use this command.`
-- Already Setup: `ℹ️ This server has already been set up. The control panel is in #[channel_name].`
-- DM Success: `✅ Setup instructions sent to your DMs.`
-- DM Error: `❌ Cannot send DM. Please enable direct messages and try again.`
+### `/setup` Command (Removed)
+This command has been removed. The bot no longer uses a persistent control panel. A transient start-of-song beacon is posted on each track start, and `/queue` provides a public snapshot.
 
 ### `/queue` Command
-**Current Messages:**
-- Empty Queue: `MESSAGES['QUEUE_EMPTY_SAD']` - "La queue est dead 😢"
-- Success: Shows queue embed (public)
-
-**Proposed Ephemeral Messages:**
-- Success: `ℹ️ Current queue displayed above.`
-- Empty: `ℹ️ The queue is currently empty.`
+Public snapshot, no components.
+- Empty: `The queue is currently empty.` (public)
+- Success: One embed listing up to 20 items: position, hyperlinked title, duration, requester. Footer shows remaining count if any.
 
 ### `/support` Command
 **Current Messages:**
@@ -125,17 +111,9 @@ This document catalogs all existing user-facing messages in the Cafe des Artiste
 - Session Expired: `⏰ Setup session expired. Please run /setup again.`
 - Invalid Channel: `❌ The channel you provided does not exist or is not a text channel. Please try again.`
 
-## Messages to Keep Public
-
-### Control Panel Embeds (NO CHANGES)
-- Queue embed (pinned message)
-- Now Playing embed (pinned message)
-- Welcome message in control channel
-
-### Background Updates (NO CHANGES)
-- Queue updates from Player Service events
-- Now Playing updates from Player Service events
-- Any `message.edit()` operations on pinned embeds
+## Public Messages
+- Start-of-song beacon message (created on song start, deleted on end/skip/reset/error)
+- `/queue` snapshot embed (one-off message)
 
 ## Implementation Notes
 

@@ -127,120 +127,25 @@ class MusicBot(commands.Bot):
         )
         await self.change_presence(activity=activity)
         
-        # Cleanup expired setup sessions on startup
-        await self._cleanup_expired_setup_sessions()
-        
-        # Restore interactive views for existing embed messages
-        # Temporarily disable embed view restoration to debug database issues
-        # await self._restore_embed_views()
-        
-        # Test database directly
-        try:
-            from utils.database import get_database_manager
-            db_manager = await get_database_manager()
-            guild_settings_list = await db_manager.get_all_guild_settings()
-            logger.info(f"DATABASE TEST - Retrieved {len(guild_settings_list)} guild settings")
-            for gs in guild_settings_list:
-                logger.info(f"DATABASE TEST - Guild setting: {type(gs)} = {gs}")
-        except Exception as e:
-            logger.error(f"DATABASE TEST - Error: {e}")
-            import traceback
-            logger.error(f"DATABASE TEST - Traceback: {traceback.format_exc()}")
-        
-        # Note: Setup DMs are only sent when bot joins new guilds (on_guild_join event)
-        # Not on every restart to avoid spamming owners of already-configured guilds
+        # Persistent setup and UI logic has been retired
 
     async def on_guild_join(self, guild):
         """Called when the bot joins a new guild"""
         logger = logging.getLogger(__name__)
         logger.info(f"Joined new guild: {guild.name} (ID: {guild.id})")
-        
-        # Check if guild already has setup (in case of rejoining)
-        try:
-            from utils.database import get_database_manager
-            db_manager = await get_database_manager()
-            
-            if not await db_manager.guild_exists(guild.id):
-                # Only send setup DM if guild is not already configured
-                logger.info(f"Sending setup DM to owner of new guild: {guild.name}")
-                await self._trigger_setup_flow(guild.owner, guild)
-            else:
-                logger.info(f"Guild {guild.name} already configured, skipping setup DM")
-                
-        except Exception as e:
-            logger.error(f"Error checking guild setup status for {guild.name}: {e}")
-            # Send setup DM anyway as fallback
-            await self._trigger_setup_flow(guild.owner, guild)
+        # No setup DM flow
 
     async def _check_guild_setups(self):
-        """Check all guilds for setup status and trigger setup for unset guilds"""
-        try:
-            from utils.database import get_database_manager
-            
-            db_manager = await get_database_manager()
-            
-            # Loop through all guilds the bot is in
-            for guild in self.guilds:
-                # Check the database - if a setup record does not exist, trigger setup flow
-                if not await db_manager.guild_exists(guild.id):
-                    # Trigger setup flow by DMing the guild.owner as specified
-                    await self._trigger_setup_flow(guild.owner, guild)
-                    
-        except Exception as e:
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error checking guild setups: {e}")
+        """Deprecated: Persistent setup removed."""
+        return
 
     async def _cleanup_expired_setup_sessions(self):
-        """Clean up expired setup sessions on bot startup"""
-        try:
-            from utils.database import get_database_manager
-            
-            db_manager = await get_database_manager()
-            cleaned_count = await db_manager.cleanup_expired_setup_sessions()
-            
-            if cleaned_count > 0:
-                logger = logging.getLogger(__name__)
-                logger.info(f"Cleaned up {cleaned_count} expired setup sessions on startup")
-                
-        except Exception as e:
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error cleaning up expired setup sessions: {e}")
+        """Deprecated: Setup sessions removed."""
+        return
 
     async def _trigger_setup_flow(self, owner: discord.Member, guild: discord.Guild):
-        """Trigger the setup flow by sending a DM to the guild owner"""
-        try:
-            # If no owner provided, get the effective owner for this guild
-            if not owner:
-                owner = await self.get_effective_owner_async(guild)
-                
-            if not owner:
-                logger = logging.getLogger(__name__)
-                logger.warning(f"No owner found for guild {guild.name} ({guild.id})")
-                return
-                
-            setup_embed = discord.Embed(
-                title="🎵 Welcome to Café des Artistes!",
-                description=f"Hi {owner.mention}! I've been added to **{guild.name}** and I'm ready to play music!\n\n"
-                           "To get started, I need to set up a control panel in one of your text channels. "
-                           "This will create persistent embeds that show the music queue and what's currently playing.\n\n"
-                           f"**To set up the control panel, run `/setup` in {guild.name}.**\n\n"
-                           "Features:\n"
-                           "🎵 **Modern Slash Commands** - Use `/play`, `/skip`, `/queue`, etc.\n"
-                           "📋 **Persistent Control Panel** - Always-visible queue and now playing info\n"
-                           "🔄 **Real-time Updates** - Automatic status updates\n"
-                           "⚡ **High Performance** - Optimized architecture for reliability",
-                color=COLORS['INFO']
-            )
-            setup_embed.set_footer(text="Run /setup in your server to get started!")
-            
-            await owner.send(embed=setup_embed)
-            
-        except discord.Forbidden:
-            # Owner has DMs disabled, can't send setup message
-            pass
-        except Exception as e:
-            logger = logging.getLogger(__name__)
-            logger.error(f"Error triggering setup flow for {guild.name}: {e}")
+        """Deprecated: Setup flow removed."""
+        return
 
     async def on_voice_state_update(self, member, before, after):
         """

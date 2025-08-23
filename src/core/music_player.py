@@ -10,8 +10,10 @@ import yt_dlp
 import requests
 import aiohttp
 import async_timeout
-from core.queue_view import QueueView
-from core.now_playing import NowPlayingDisplay
+"""Deprecated legacy music player module (kept temporarily for tests).
+
+QueueView and NowPlayingDisplay imports removed as persistent UI is retired.
+"""
 from utils.constants import YTDL_OPTIONS, FFMPEG_OPTIONS, MESSAGES, COLORS
 import random
 
@@ -624,9 +626,8 @@ class MusicPlayer:
 
             self.voice_client.play(audio, after=after_playing)
 
-            # Create and start the now playing display
-            self.current_display = NowPlayingDisplay(self.ctx, self.current)
-            await self.current_display.start()
+            # Legacy display retired
+            self.current_display = None
 
         except Exception as e:
             print(f"Error in play_next: {e}")
@@ -877,7 +878,8 @@ class MusicPlayer:
                 )
                 pages.append(embed)
                 
-            return pages[0], QueueView(pages) if len(pages) > 1 else None
+            # Legacy QueueView retired; return first page only
+            return pages[0], None
 
     def _format_duration(self, seconds: float) -> str:
         """
