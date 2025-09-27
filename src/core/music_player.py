@@ -10,6 +10,7 @@ import yt_dlp
 import requests
 import aiohttp
 import async_timeout
+from core.voice_manager import GuildVoiceState
 from core.queue_view import QueueView
 from core.now_playing import NowPlayingDisplay
 from core.error_recovery import ErrorRecovery, AudioSourceWrapper
@@ -101,6 +102,14 @@ class MusicPlayer:
             voice_client = self.bot.voice_manager.get_voice_client(self.ctx.guild.id)
             if voice_client:
                 self.voice_client = voice_client
+                # Ensure manager knows the latest playback channel
+                state = self.bot.voice_manager.voice_states.setdefault(
+                    self.ctx.guild.id,
+                    GuildVoiceState(lock=asyncio.Lock()),
+                )
+                state.channel_id = voice_client.channel.id if voice_client.channel else None
+                state.text_channel_id = getattr(self.ctx, 'channel', None).id if getattr(self.ctx, 'channel', None) else None
+                state.voice_client = voice_client
                 return
                 
             # Determine target voice channel
@@ -119,6 +128,15 @@ class MusicPlayer:
             self.voice_client = await self.bot.voice_manager.ensure_connected(
                 target_channel
             )
+
+            # Update stored state for recovery
+            state = self.bot.voice_manager.voice_states.setdefault(
+                self.ctx.guild.id,
+                GuildVoiceState(lock=asyncio.Lock()),
+            )
+            state.channel_id = target_channel.id
+            state.text_channel_id = getattr(self.ctx, 'channel', None).id if getattr(self.ctx, 'channel', None) else None
+            state.voice_client = self.voice_client
             
         except Exception as e:
             print(f"Voice client initialization error: {str(e)}")

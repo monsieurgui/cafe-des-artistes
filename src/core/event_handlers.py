@@ -5,9 +5,10 @@ Handles voice state changes and bot events for robust connection management
 
 import asyncio
 import logging
-import discord
-from discord.ext import commands
 from typing import Optional
+
+import discord
+from core.voice_manager import GuildVoiceState
 
 logger = logging.getLogger(__name__)
 
@@ -69,7 +70,15 @@ class VoiceEventHandlers:
         
         # Notify voice manager about disconnection
         if hasattr(self.bot, 'voice_manager'):
-            await self.bot.voice_manager.handle_disconnect(guild_id, "Disconnected from voice channel")
+            close_code = None
+            voice_client = self.bot.voice_manager.get_voice_client(guild_id)
+            if voice_client and getattr(voice_client, 'ws', None):
+                close_code = getattr(voice_client.ws, 'close_code', None)
+            await self.bot.voice_manager.handle_disconnect(
+                guild_id,
+                "Disconnected from voice channel",
+                close_code=close_code,
+            )
         
         # Check if we have a music player for this guild
         music_player = self.bot.music_players.get(guild_id)
@@ -107,8 +116,14 @@ class VoiceEventHandlers:
         if hasattr(self.bot, 'voice_manager'):
             voice_client = self.bot.voice_manager.get_voice_client(guild_id)
             if voice_client:
-                # Update the tracked connection
-                self.bot.voice_manager.connections[guild_id] = voice_client
+                state = self.bot.voice_manager.voice_states.setdefault(
+                    guild_id,
+                    GuildVoiceState(lock=asyncio.Lock()),
+                )
+                state.voice_client = voice_client
+                state.channel_id = new_channel.id if isinstance(new_channel, discord.VoiceChannel) else None
+                state.text_channel_id = state.text_channel_id or self._resolve_text_channel_id(guild_id)
+                state.recovery_state = "STABLE"
     
     async def _handle_bot_connect(self, guild_id: int, channel: discord.VoiceChannel) -> None:
         """

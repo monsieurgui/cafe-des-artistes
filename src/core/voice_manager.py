@@ -5,11 +5,33 @@ Addresses random disconnections and implements automatic recovery
 
 import asyncio
 import logging
-import discord
+import random
+import time
+from dataclasses import dataclass
 from typing import Optional, Dict, Any
+
+import discord
 from discord.ext import commands
 
 logger = logging.getLogger(__name__)
+
+
+@dataclass
+class GuildVoiceState:
+    channel_id: Optional[int] = None
+    text_channel_id: Optional[int] = None
+    voice_client: Optional[discord.VoiceClient] = None
+    reconnect_attempts: int = 0
+    cooldown_until: float = 0.0
+    last_success_at: float = 0.0
+    last_failure_at: float = 0.0
+    last_close_code: Optional[int] = None
+    last_disconnect_reason: Optional[str] = None
+    recovery_state: str = "IDLE"
+    allow_auto_rejoin: bool = True
+    lock: Optional[asyncio.Lock] = None
+    recovery_task: Optional[asyncio.Task] = None
+    unknown_close_count: int = 0
 
 
 class VoiceConnectionManager:
@@ -20,10 +42,10 @@ class VoiceConnectionManager:
     
     def __init__(self, bot: commands.Bot):
         self.bot = bot
-        self.connections: Dict[int, discord.VoiceClient] = {}
-        self.reconnect_attempts: Dict[int, int] = {}
-        self.max_reconnect_attempts = 3
+        self.voice_states: Dict[int, GuildVoiceState] = {}
+        self.max_reconnect_attempts = 5
         self.reconnect_delay_base = 2  # Base delay in seconds for exponential backoff
+        self.max_reconnect_delay = 300  # clamp at 5 minutes
         
     async def ensure_connected(self, channel: discord.VoiceChannel, *, timeout: float = 60.0) -> discord.VoiceClient:
         """
@@ -42,9 +64,35 @@ class VoiceConnectionManager:
         guild_id = channel.guild.id
         
         # Check if we already have a valid connection
-        existing_voice_client = self.connections.get(guild_id)
+        state = self.voice_states.setdefault(guild_id, GuildVoiceState(lock=asyncio.Lock()))
+
+        # Respect cooldown before attempting new connection
+        now = time.monotonic()
+        if state.cooldown_until and now < state.cooldown_until:
+            delay = state.cooldown_until - now
+            logger.info(
+                "Voice connection waiting for cooldown",
+                extra={
+                    "guild_id": guild_id,
+                    "channel_id": channel.id,
+                    "delay": round(delay, 2),
+                },
+            )
+            await asyncio.sleep(delay)
+
+        existing_voice_client = state.voice_client
         if existing_voice_client and self._is_connection_valid(existing_voice_client, channel):
-            logger.debug(f"Using existing valid connection for guild {guild_id}")
+            logger.debug(
+                "Voice connection reused",
+                extra={
+                    "guild_id": guild_id,
+                    "channel_id": channel.id,
+                    "close_code": state.last_close_code,
+                    "recovery_state": state.recovery_state,
+                },
+            )
+            state.channel_id = channel.id
+            state.recovery_state = "STABLE"
             return existing_voice_client
             
         # Clean up invalid connections
@@ -65,27 +113,56 @@ class VoiceConnectionManager:
                     raise discord.DiscordException("Connection validation failed")
                     
                 # Store successful connection
-                self.connections[guild_id] = voice_client
-                self.reconnect_attempts[guild_id] = 0
+                state.voice_client = voice_client
+                state.reconnect_attempts = 0
+                state.last_success_at = time.monotonic()
+                state.cooldown_until = 0
+                state.channel_id = channel.id
+                state.recovery_state = "STABLE"
+                state.last_close_code = None
+                state.last_disconnect_reason = None
                 
                 logger.info(f"Successfully connected to voice channel {channel.name}")
                 return voice_client
                 
             except Exception as e:
                 attempt += 1
-                logger.warning(f"Voice connection attempt {attempt} failed: {e}")
+                state.reconnect_attempts = attempt
+                state.last_failure_at = time.monotonic()
+                state.recovery_state = "RETRYING"
+                logger.warning(
+                    "Voice connection attempt failed",
+                    extra={
+                        "guild_id": guild_id,
+                        "channel_id": channel.id,
+                        "attempt": attempt,
+                        "max_attempts": self.max_reconnect_attempts,
+                        "error": str(e),
+                    },
+                )
                 
                 if attempt < self.max_reconnect_attempts:
                     # Exponential backoff delay
-                    delay = self.reconnect_delay_base ** attempt
-                    logger.info(f"Retrying connection in {delay} seconds...")
+                    base_delay = min(self.reconnect_delay_base ** attempt, self.max_reconnect_delay)
+                    jitter = random.uniform(0.7, 1.3)
+                    delay = base_delay * jitter
+                    state.cooldown_until = time.monotonic() + delay
+                    logger.info(
+                        "Retrying voice connection",
+                        extra={
+                            "guild_id": guild_id,
+                            "channel_id": channel.id,
+                            "delay": round(delay, 2),
+                            "attempt": attempt,
+                        },
+                    )
                     await asyncio.sleep(delay)
                 else:
                     # Final attempt failed
                     await self._cleanup_connection(guild_id)
                     raise discord.DiscordException(f"Failed to connect after {self.max_reconnect_attempts} attempts: {e}")
     
-    async def handle_disconnect(self, guild_id: int, reason: str = "Unknown") -> bool:
+    async def handle_disconnect(self, guild_id: int, reason: str = "Unknown", *, close_code: Optional[int] = None) -> bool:
         """
         Handles unexpected disconnections with automatic recovery.
         
@@ -96,25 +173,122 @@ class VoiceConnectionManager:
         Returns:
             bool: True if recovery was successful, False otherwise
         """
-        logger.warning(f"Handling disconnect for guild {guild_id}: {reason}")
+        logger.warning(
+            "Voice disconnect detected",
+            extra={
+                "guild_id": guild_id,
+                "reason": reason,
+                "close_code": close_code,
+            },
+        )
         
-        # Clean up the old connection
+        state = self.voice_states.setdefault(guild_id, GuildVoiceState(lock=asyncio.Lock()))
+        state.last_disconnect_reason = reason
+        state.last_close_code = close_code
+        if close_code == 4006:
+            state.unknown_close_count = 0
+        elif close_code in (4014, 1000):
+            state.unknown_close_count = 0
+        else:
+            state.unknown_close_count += 1
+        state.recovery_state = "RETRYING"
+        state.last_failure_at = time.monotonic()
+        
         await self._cleanup_connection(guild_id)
-        
-        # Check if we should attempt reconnection
-        attempts = self.reconnect_attempts.get(guild_id, 0)
-        if attempts >= self.max_reconnect_attempts:
-            logger.error(f"Max reconnection attempts reached for guild {guild_id}")
+
+        if not state.allow_auto_rejoin:
+            logger.info(
+                "Auto-rejoin suppressed for guild",
+                extra={"guild_id": guild_id, "cooldown_until": state.cooldown_until},
+            )
             return False
-            
-        # Increment attempt counter
-        self.reconnect_attempts[guild_id] = attempts + 1
-        
-        # Attempt to find the last known voice channel
-        # This would typically be stored in the music player state
-        # For now, we'll return False and let the music player handle reconnection
-        return False
+
+        state.reconnect_attempts += 1
+
+        # escalate cooldown for unknown close codes
+        if close_code and close_code not in (4006, 4014, 1000) and state.unknown_close_count >= 3:
+            state.allow_auto_rejoin = False
+            state.recovery_state = "MANUAL_REQUIRED"
+            logger.error(
+                "Repeated unknown voice close codes; disabling auto rejoin",
+                extra={
+                    "guild_id": guild_id,
+                    "close_code": close_code,
+                    "unknown_count": state.unknown_close_count,
+                },
+            )
+            return False
+
+        if state.reconnect_attempts >= self.max_reconnect_attempts:
+            state.cooldown_until = time.monotonic() + self._long_cooldown(state.reconnect_attempts)
+            state.recovery_state = "COOLDOWN"
+            logger.error(
+                "Max reconnection attempts reached",
+                extra={
+                    "guild_id": guild_id,
+                    "close_code": close_code,
+                    "reason": reason,
+                    "cooldown_until": state.cooldown_until,
+                },
+            )
+            return False
+
+        if state.channel_id is None:
+            logger.warning(
+                "No channel stored for reconnect; manual intervention required",
+                extra={"guild_id": guild_id},
+            )
+            return False
+
+        delay = self._calculate_backoff(state.reconnect_attempts)
+        state.cooldown_until = time.monotonic() + delay
+
+        if not state.lock:
+            state.lock = asyncio.Lock()
+
+        if state.recovery_task and not state.recovery_task.done():
+            state.recovery_task.cancel()
+
+        async def delayed_reconnect():
+            async with state.lock:
+                await asyncio.sleep(delay)
+                if time.monotonic() < state.cooldown_until - 0.01:
+                    return
+                channel = self._resolve_channel(guild_id, state.channel_id)
+                if channel:
+                    try:
+                        await self.ensure_connected(channel)
+                    except Exception as exc:
+                        logger.error(
+                            "Auto-reconnect attempt failed",
+                            extra={
+                                "guild_id": guild_id,
+                                "channel_id": state.channel_id,
+                                "error": str(exc),
+                            },
+                        )
+
+        state.recovery_task = asyncio.create_task(delayed_reconnect())
+        return True
     
+    def _calculate_backoff(self, attempts: int) -> float:
+        base_delay = min(self.reconnect_delay_base ** attempts, self.max_reconnect_delay)
+        jitter = random.uniform(0.7, 1.3)
+        return base_delay * jitter
+
+    def _long_cooldown(self, attempts: int) -> float:
+        # escalate cooldown after exhausting retries
+        return min(self.max_reconnect_delay, 30 * (attempts ** 2))
+
+    def _resolve_channel(self, guild_id: int, channel_id: Optional[int]) -> Optional[discord.VoiceChannel]:
+        if channel_id is None:
+            return None
+        guild = self.bot.get_guild(guild_id)
+        if not guild:
+            return None
+        channel = guild.get_channel(channel_id)
+        return channel if isinstance(channel, discord.VoiceChannel) else None
+
     def _is_connection_valid(self, voice_client: discord.VoiceClient, target_channel: discord.VoiceChannel) -> bool:
         """
         Validates if a voice connection is still valid and connected to the correct channel.
@@ -151,8 +325,9 @@ class VoiceConnectionManager:
         Args:
             guild_id: Guild ID to cleanup
         """
+        state = self.voice_states.get(guild_id)
+        voice_client = state.voice_client if state else None
         try:
-            voice_client = self.connections.get(guild_id)
             if voice_client:
                 logger.debug(f"Cleaning up voice connection for guild {guild_id}")
                 
@@ -161,12 +336,14 @@ class VoiceConnectionManager:
                     await voice_client.disconnect(force=True)
                 
                 # Remove from our tracking
-                del self.connections[guild_id]
+                if state:
+                    state.voice_client = None
                 
         except Exception as e:
             logger.error(f"Error during voice connection cleanup for guild {guild_id}: {e}")
-            # Ensure cleanup even if error occurs
-            self.connections.pop(guild_id, None)
+        finally:
+            if state:
+                state.voice_client = None
     
     async def disconnect_all(self) -> None:
         """
@@ -174,13 +351,15 @@ class VoiceConnectionManager:
         Useful for bot shutdown or reset.
         """
         logger.info("Disconnecting from all voice channels")
-        
-        for guild_id in list(self.connections.keys()):
+
+        for guild_id in list(self.voice_states.keys()):
             await self._cleanup_connection(guild_id)
-            
-        # Clear all tracking data
-        self.connections.clear()
-        self.reconnect_attempts.clear()
+
+        # Clear state data
+        for state in self.voice_states.values():
+            state.voice_client = None
+            state.reconnect_attempts = 0
+            state.recovery_state = "IDLE"
     
     def get_voice_client(self, guild_id: int) -> Optional[discord.VoiceClient]:
         """
@@ -192,9 +371,9 @@ class VoiceConnectionManager:
         Returns:
             Optional[discord.VoiceClient]: Voice client if valid, None otherwise
         """
-        voice_client = self.connections.get(guild_id)
-        if voice_client and voice_client.is_connected():
-            return voice_client
+        state = self.voice_states.get(guild_id)
+        if state and state.voice_client and state.voice_client.is_connected():
+            return state.voice_client
         return None
     
     async def validate_all_connections(self) -> None:
@@ -204,7 +383,10 @@ class VoiceConnectionManager:
         """
         invalid_guilds = []
         
-        for guild_id, voice_client in self.connections.items():
+        for guild_id, state in self.voice_states.items():
+            voice_client = state.voice_client
+            if not voice_client:
+                continue
             try:
                 if not voice_client.is_connected():
                     invalid_guilds.append(guild_id)
