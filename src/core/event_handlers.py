@@ -8,6 +8,8 @@ import logging
 from typing import Optional
 
 import discord
+from discord.ext import commands
+
 from core.voice_manager import GuildVoiceState
 
 logger = logging.getLogger(__name__)
