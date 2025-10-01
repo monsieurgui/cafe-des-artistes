@@ -99,6 +99,17 @@ class VoiceConnectionManager:
         if existing_voice_client:
             await self._cleanup_connection(guild_id)
             
+        # Also check for any lingering guild-level voice clients
+        guild = channel.guild
+        if guild.voice_client:
+            logger.warning(f"Found lingering guild voice client for guild {guild_id}, cleaning up")
+            try:
+                await guild.voice_client.disconnect(force=True)
+            except Exception as e:
+                logger.error(f"Error disconnecting lingering voice client: {e}")
+            # Give Discord a moment to process the disconnection
+            await asyncio.sleep(0.5)
+            
         # Attempt connection with retry logic
         attempt = 0
         while attempt < self.max_reconnect_attempts:
@@ -130,6 +141,19 @@ class VoiceConnectionManager:
                 state.reconnect_attempts = attempt
                 state.last_failure_at = time.monotonic()
                 state.recovery_state = "RETRYING"
+                
+                # Special handling for "already connected" error
+                error_str = str(e).lower()
+                if "already connected" in error_str:
+                    logger.warning(f"Already connected error detected, forcing cleanup for guild {guild_id}")
+                    # Force disconnect any lingering connections
+                    try:
+                        if guild.voice_client:
+                            await guild.voice_client.disconnect(force=True)
+                            await asyncio.sleep(1.0)  # Give more time for cleanup
+                    except Exception as cleanup_error:
+                        logger.error(f"Error during forced cleanup: {cleanup_error}")
+                
                 logger.warning(
                     "Voice connection attempt failed",
                     extra={

@@ -115,13 +115,22 @@ class MusicPlayer:
             # Determine target voice channel
             target_channel = None
             
-            # Try current voice client's channel first
-            if self.ctx.voice_client and self.ctx.voice_client.channel:
+            # First priority: Check voice manager's tracked channel
+            state = self.bot.voice_manager.voice_states.get(self.ctx.guild.id)
+            if state and state.channel_id:
+                channel = self.ctx.guild.get_channel(state.channel_id)
+                if channel and isinstance(channel, discord.VoiceChannel):
+                    target_channel = channel
+            
+            # Second priority: Try current voice client's channel
+            if not target_channel and self.ctx.voice_client and self.ctx.voice_client.channel:
                 target_channel = self.ctx.voice_client.channel
-            # Then try author's voice channel
-            elif self.ctx.author.voice:
+            
+            # Third priority: Try author's voice channel
+            if not target_channel and self.ctx.author.voice:
                 target_channel = self.ctx.author.voice.channel
-            else:
+                
+            if not target_channel:
                 raise ValueError(MESSAGES['VOICE_CHANNEL_REQUIRED'])
                 
             # Use voice manager to establish robust connection

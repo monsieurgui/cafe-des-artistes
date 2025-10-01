@@ -45,6 +45,20 @@ Created comprehensive modernization plan in plan.md addressing:
 ## Next Steps
 Ready for comprehensive testing and validation. All 6 phases of modernization complete!
 
+## Recent Fixes (2025-10-01)
+### Fixed "Already Connected" Error After Idle Period
+- **Issue**: Bot failed to start playing after being idle, showing "Already connected to a voice channel" error
+- **Root Cause**: Stale guild-level voice clients not being properly cleaned up before attempting new connections
+- **Fix Applied**:
+  1. Added guild-level voice client cleanup before connection attempts in `VoiceConnectionManager.ensure_connected()`
+  2. Added special error handling for "already connected" errors with forced cleanup and longer wait time
+  3. Improved channel resolution priority in `MusicPlayer.ensure_voice_client()` to prefer voice manager's tracked channel
+  4. Added 0.5-1.0 second delay after disconnection to ensure Discord processes the cleanup
+- **Files Modified**:
+  - `src/core/voice_manager.py`: Enhanced cleanup and error handling
+  - `src/core/music_player.py`: Improved channel resolution logic
+- **Status**: ✅ Ready for testing
+
 ## Testing Phase Checklist
 - [ ] Test voice connection stability (24+ hour test)
 - [ ] Test automatic reconnection after disconnects
@@ -53,6 +67,7 @@ Ready for comprehensive testing and validation. All 6 phases of modernization co
 - [ ] Test memory usage and performance
 - [ ] Test concurrent operations
 - [ ] Validate all critical fixes work as expected
+- [ ] Test "already connected" fix: idle bot resuming playback after 10+ minutes
 
 ## 2025-09-27 Updates
 ### yt-dlp Release 2025.09.24 Highlights
