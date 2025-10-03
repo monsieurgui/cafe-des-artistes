@@ -207,62 +207,94 @@ class MusicPlayer:
                 # Prepare search query if not a URL
                 search_query = query if is_url else f"ytsearch:{query}"
                 
-                # Use minimal ytdl options for fast initial search
+                # Determine if this might be a playlist URL
+                is_playlist_url = 'playlist' in query.lower() or 'list=' in query
+                
+                # Use fast extraction for ALL queries - we'll get full info when playing
+                # This makes adding songs nearly instant (1-2 seconds instead of 10-20)
                 ytdl_opts = {
-                    'format': 'bestaudio/best',
+                    'format': 'bestaudio',
                     'quiet': True,
                     'no_warnings': True,
-                    'noplaylist': True,
+                    'noplaylist': False,  # Allow playlists
                     'default_search': 'ytsearch',
-                    'extract_flat': True,  # Only fetch metadata initially
+                    'extract_flat': True,  # ALWAYS use flat extraction for speed
                     'skip_download': True,
-                    'force_generic_extractor': False,
                     'socket_timeout': 5,
-                    'retries': 2
+                    'retries': 2,
+                    'ignoreerrors': True
                 }
                 
-                # Check cache first
-                if search_query in self._cached_urls:
-                    song = self._cached_urls[search_query].copy()
-                else:
-                    # Use dedicated search pool with shorter timeout
-                    try:
-                        async with async_timeout.timeout(10):
-                            info = await asyncio.get_event_loop().run_in_executor(
-                                self.search_pool, 
-                                lambda: yt_dlp.YoutubeDL(ytdl_opts).extract_info(search_query, download=False)
-                            )
+                # Use dedicated search pool with short timeout for fast response
+                try:
+                    async with async_timeout.timeout(8):
+                        info = await asyncio.get_event_loop().run_in_executor(
+                            self.search_pool, 
+                            lambda: yt_dlp.YoutubeDL(ytdl_opts).extract_info(search_query, download=False)
+                        )
+                        
+                        if not info:
+                            raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
+
+                        songs_added = 0
+                        
+                        # Handle playlist results
+                        if 'entries' in info:
+                            entries = [e for e in info.get('entries', []) if e]  # Filter out None entries
                             
-                            if not info:
+                            if not entries:
                                 raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
-
-                            # Handle search results
-                            if 'entries' in info:
-                                if not info['entries']:
-                                    raise ValueError(MESSAGES['VIDEO_UNAVAILABLE'])
-                                info = info['entries'][0]
-
-                            # Create minimal song info initially
+                            
+                            # Check if this is a playlist or just search results
+                            if info.get('_type') == 'playlist' or is_playlist_url:
+                                # It's a playlist - add all entries quickly
+                                for entry in entries:
+                                    song_url = entry.get('url') or f"https://www.youtube.com/watch?v={entry.get('id')}"
+                                    song = {
+                                        'url': song_url,
+                                        'title': entry.get('title', 'Unknown'),
+                                        'duration': entry.get('duration', 0),
+                                    }
+                                    await self.queue_manager.add_song(song, preload=False)
+                                    songs_added += 1
+                                
+                                # Notify about playlist
+                                embed = discord.Embed(
+                                    description=MESSAGES['PLAYLIST_ADDED'].format(songs_added),
+                                    color=COLORS['SUCCESS']
+                                )
+                                await self.ctx.send(embed=embed)
+                            else:
+                                # It's search results - take first one
+                                entry = entries[0]
+                                song_url = entry.get('url') or f"https://www.youtube.com/watch?v={entry.get('id')}"
+                                song = {
+                                    'url': song_url,
+                                    'title': entry.get('title', 'Unknown'),
+                                    'duration': entry.get('duration', 0),
+                                }
+                                await self.queue_manager.add_song(song, preload=True)
+                                songs_added = 1
+                        else:
+                            # Single video from flat extraction
+                            song_url = info.get('url') or f"https://www.youtube.com/watch?v={info.get('id')}"
                             song = {
-                                'url': info.get('webpage_url', info.get('url', search_query)),
+                                'url': song_url,
                                 'title': info.get('title', 'Unknown'),
                                 'duration': info.get('duration', 0),
-                                'needs_processing': True  # Mark for background processing
                             }
-                            self._cached_urls[search_query] = song.copy()
-                            
-                            # Start background processing for full metadata
-                            asyncio.create_task(self._process_song_metadata(song))
-                    except Exception as e:
-                        print(f"Search error: {e}")
-                        raise
+                            await self.queue_manager.add_song(song, preload=True)
+                            songs_added = 1
+                        
+                except Exception as e:
+                    print(f"Search error: {e}")
+                    raise
 
-                await self.queue_manager.add_song(song, preload=True)
-                
                 # Start playing immediately if nothing is playing
                 if not self.voice_client or not self.voice_client.is_playing():
                     await self.play_next()
-                else:
+                elif songs_added == 1:
+                    # Only show "added" message for single songs (playlist message already shown)
                     embed = discord.Embed(
                         description=MESSAGES['SONG_ADDED'].format(
                             title=song['title'],
@@ -275,7 +307,7 @@ class MusicPlayer:
         except asyncio.TimeoutError:
             error_embed = discord.Embed(
                 title=MESSAGES['ERROR_TITLE'],
-                description=MESSAGES['TIMEOUT_ERROR'],
+                description="⏱️ Timeout lors de la recherche. Veuillez réessayer.",
                 color=COLORS['ERROR']
             )
             await self.ctx.send(embed=error_embed)

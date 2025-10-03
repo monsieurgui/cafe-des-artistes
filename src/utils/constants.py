@@ -11,7 +11,7 @@ YTDL_OPTIONS = {
     'prefer_free_formats': True,
     'socket_timeout': 30,
     'retries': 5,
-    'noplaylist': True,
+    'noplaylist': False,  # Allow playlists
     'postprocessors': [],
     'cachedir': False,
     'writethumbnail': False,
