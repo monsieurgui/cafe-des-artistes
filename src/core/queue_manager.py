@@ -38,7 +38,7 @@ class SimpleQueueManager:
         try:
             # Simple add to queue
             self.queue.append(song)
-            logger.info(f"Added song to queue: {song.get('title', 'Unknown')}")
+            logger.info(f"[QUEUE] Added song to queue: {song.get('title', 'Unknown')} | Queue size now: {len(self.queue)}")
             return True
             
         except Exception as e:
@@ -53,10 +53,12 @@ class SimpleQueueManager:
             Optional[Dict]: Next song info or None if queue is empty
         """
         if not self.queue:
+            logger.info("[QUEUE] get_next_song called but queue is empty")
             return None
         
         song = self.queue.popleft()
         self.current_song = song
+        logger.info(f"[QUEUE] Popped song: {song.get('title', 'Unknown')} | Queue size now: {len(self.queue)}")
         return song
     
     def get_queue_info(self) -> Dict[str, Any]:

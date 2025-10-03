@@ -291,7 +291,7 @@ class MusicPlayer:
                     raise
 
                 # Start playing immediately if nothing is playing
-                if not self.voice_client or not self.voice_client.is_playing():
+                if not self.voice_client or not (self.voice_client.is_connected() and self.voice_client.is_playing()):
                     await self.play_next()
                 elif songs_added == 1:
                     # Only show "added" message for single songs (playlist message already shown)
@@ -382,15 +382,20 @@ class MusicPlayer:
 
                 if self.loop and self.loop_song:
                     next_song = self.loop_song
+                    print(f"[PLAY_NEXT] Using loop song: {self.loop_song.get('title')}")
                 else:
                     if not self.queue_manager.queue:
                         self.current = None
+                        print("[PLAY_NEXT] Queue is empty, stopping playback")
                         return
                     # Use queue manager to pop next (and trigger preload/persistence)
+                    print(f"[PLAY_NEXT] Queue size before pop: {len(self.queue_manager.queue)}")
                     next_song = await self.queue_manager.get_next_song()
                     if not next_song:
                         self.current = None
+                        print("[PLAY_NEXT] get_next_song returned None")
                         return
+                    print(f"[PLAY_NEXT] Popped song: {next_song.get('title')}, Queue size now: {len(self.queue_manager.queue)}")
 
                 if next_song['url'] in self._song_cache:
                     info = self._song_cache[next_song['url']]
