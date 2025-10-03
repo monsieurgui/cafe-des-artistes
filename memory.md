@@ -77,15 +77,30 @@ Ready for comprehensive testing and validation. All 6 phases of modernization co
   - `src/core/music_player.py`: Optimized extraction strategy
 - **Status**: ✅ Ready for testing
 
+### Removed Queue Persistence and Caching Systems
+- **Issue**: Queue restoration/persistence and caching were causing delays and complexity
+- **Changes Made**:
+  1. Removed all queue restoration logic from `event_handlers.py` (on_ready, on_disconnect, etc.)
+  2. Removed queue persistence saves from disconnect handlers
+  3. Replaced `AdvancedQueueManager` with `SimpleQueueManager` - no caching, no persistence, no preloading
+  4. Removed `QueuePersistence`, `ExtractionCache`, `SmartPreloader`, and `QueueValidator` classes
+  5. Queue now operates as simple deque with add/get operations only
+- **Performance Improvement**: First !p command should now be fast with no cache initialization delay
+- **Files Modified**:
+  - `src/core/event_handlers.py`: Removed restoration and persistence calls
+  - `src/core/queue_manager.py`: Completely rewritten as simple lightweight queue
+- **Status**: ✅ Complete
+
 ## Testing Phase Checklist
 - [ ] Test voice connection stability (24+ hour test)
 - [ ] Test automatic reconnection after disconnects
-- [ ] Test queue persistence across restarts
 - [ ] Test error recovery scenarios
 - [ ] Test memory usage and performance
 - [ ] Test concurrent operations
 - [ ] Validate all critical fixes work as expected
 - [ ] Test "already connected" fix: idle bot resuming playback after 10+ minutes
+- [ ] Test fast song addition (should be 1-3 seconds now)
+- [ ] Test playlist processing (should extract all songs)
 
 ## 2025-09-27 Updates
 ### yt-dlp Release 2025.09.24 Highlights

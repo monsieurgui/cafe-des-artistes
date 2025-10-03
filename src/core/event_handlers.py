@@ -85,14 +85,6 @@ class VoiceEventHandlers:
         # Check if we have a music player for this guild
         music_player = self.bot.music_players.get(guild_id)
         if music_player:
-            # Save current queue state
-            if hasattr(music_player, 'queue_manager'):
-                await music_player.queue_manager.persistence.save_queue_state(
-                    music_player.queue_manager.queue,
-                    music_player.queue_manager.current_song,
-                    {'disconnect_time': asyncio.get_event_loop().time()}
-                )
-            
             # Stop current playback display
             if music_player.current_display:
                 await music_player.current_display.stop()
@@ -136,22 +128,6 @@ class VoiceEventHandlers:
             channel: Channel bot connected to
         """
         logger.info(f"Bot connected to voice channel {channel.name} in guild {guild_id}")
-        
-        # Check if we should restore queue state
-        music_player = self.bot.music_players.get(guild_id)
-        if music_player and hasattr(music_player, 'queue_manager'):
-            restored = await music_player.queue_manager.restore_from_persistence()
-            if restored:
-                logger.info(f"Restored queue state for guild {guild_id}")
-                # Resume playback if there were songs in queue
-                if music_player.queue_manager.queue:
-                    if not getattr(music_player, 'voice_client', None) or not music_player.voice_client.is_connected():
-                        try:
-                            await music_player.ensure_voice_client()
-                        except Exception:
-                            return
-                    if not music_player.voice_client.is_playing():
-                        await music_player.play_next()
     
     async def on_guild_join(self, guild: discord.Guild) -> None:
         """
@@ -184,10 +160,6 @@ class VoiceEventHandlers:
         if guild.id in self.bot.music_players:
             music_player = self.bot.music_players[guild.id]
             
-            # Save final queue state
-            if hasattr(music_player, 'queue_manager'):
-                await music_player.queue_manager.cleanup()
-            
             # Cleanup the player
             if hasattr(music_player, 'cleanup'):
                 await music_player.cleanup()
@@ -213,44 +185,10 @@ class BotEventHandlers:
         if hasattr(self.bot, 'connection_monitor'):
             if not self.bot.connection_monitor.is_monitoring:
                 self.bot.connection_monitor.start_monitoring()
-        
-        # Attempt to restore queue states for all guilds
-        await self._restore_all_guild_states()
-    
-    async def _restore_all_guild_states(self) -> None:
-        """Restore queue states for all guilds on bot startup."""
-        logger.info("Attempting to restore queue states for all guilds...")
-        
-        restored_count = 0
-        for guild in self.bot.guilds:
-            try:
-                # Ensure a player exists for the guild
-                if guild.id not in self.bot.music_players:
-                    from core.music_player import MusicPlayer  # lazy import to avoid cycles
-                    dummy_ctx = type('Ctx', (), {'guild': guild, 'send': lambda *a, **k: None})
-                    self.bot.music_players[guild.id] = MusicPlayer(self.bot, dummy_ctx)
-
-                music_player = self.bot.music_players[guild.id]
-                if hasattr(music_player, 'queue_manager'):
-                    restored = await music_player.queue_manager.restore_from_persistence()
-                    if restored:
-                        restored_count += 1
-                        logger.info(f"Restored queue for guild {guild.name}")
-
-            except Exception as e:
-                logger.error(f"Failed to restore queue for guild {guild.name}: {e}")
-        
-        if restored_count > 0:
-            logger.info(f"Successfully restored queues for {restored_count} guilds")
-        else:
-            logger.info("No queue states to restore")
     
     async def on_disconnect(self) -> None:
         """Handle bot disconnect event."""
         logger.warning("Bot disconnected from Discord")
-        
-        # Save all queue states before disconnect
-        await self._save_all_guild_states()
     
     async def on_connect(self) -> None:
         """Handle bot connect/reconnect event."""
@@ -263,24 +201,6 @@ class BotEventHandlers:
         # Validate all voice connections after resume
         if hasattr(self.bot, 'voice_manager'):
             await self.bot.voice_manager.validate_all_connections()
-    
-    async def _save_all_guild_states(self) -> None:
-        """Save queue states for all guilds."""
-        logger.info("Saving queue states for all guilds...")
-        
-        save_tasks = []
-        for guild_id, music_player in self.bot.music_players.items():
-            if hasattr(music_player, 'queue_manager'):
-                task = music_player.queue_manager.persistence.save_queue_state(
-                    music_player.queue_manager.queue,
-                    music_player.queue_manager.current_song,
-                    {'save_time': asyncio.get_event_loop().time()}
-                )
-                save_tasks.append(task)
-        
-        if save_tasks:
-            await asyncio.gather(*save_tasks, return_exceptions=True)
-            logger.info(f"Saved states for {len(save_tasks)} guilds")
     
     async def on_error(self, event: str, *args, **kwargs) -> None:
         """Handle general bot errors."""
