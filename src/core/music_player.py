@@ -368,6 +368,12 @@ class MusicPlayer:
             try:
                 if self.voice_client is None or not self.voice_client.is_connected():
                     await self.ensure_voice_client()
+                
+                # Re-enable auto-rejoin when starting playback (allows recovery from unexpected disconnects)
+                if hasattr(self.bot, 'voice_manager'):
+                    state = self.bot.voice_manager.voice_states.get(self.ctx.guild.id)
+                    if state:
+                        state.allow_auto_rejoin = True
 
                 if not self.queue_manager.queue and not self.loop:
                     self.current = None
@@ -614,18 +620,30 @@ class MusicPlayer:
             if hasattr(self, 'preload_queue'):
                 self.preload_queue.clear()
             
-            # Handle voice client
+            # IMPORTANT: Disable auto-rejoin BEFORE disconnecting to prevent reconnection
+            if hasattr(self.bot, 'voice_manager'):
+                try:
+                    state = self.bot.voice_manager.voice_states.get(self.ctx.guild.id)
+                    if state:
+                        state.allow_auto_rejoin = False
+                        state.channel_id = None  # Clear channel to prevent reconnection
+                        print(f"[CLEANUP] Disabled auto-rejoin for guild {self.ctx.guild.id}")
+                except Exception as e:
+                    print(f"[CLEANUP] Error disabling auto-rejoin: {e}")
+            
+            # Now handle voice client disconnect
             if self.voice_client:
                 try:
                     if self.voice_client.is_playing():
                         self.voice_client.stop()
                     if self.voice_client.is_connected():
+                        print(f"[CLEANUP] Disconnecting voice client for guild {self.ctx.guild.id}")
                         await self.voice_client.disconnect()
-                except:
-                    pass
+                except Exception as e:
+                    print(f"[CLEANUP] Error disconnecting voice client: {e}")
                 self.voice_client = None
 
-            # Ensure voice manager also drops the tracked connection
+            # Cleanup voice manager connection tracking
             if hasattr(self.bot, 'voice_manager'):
                 try:
                     await self.bot.voice_manager._cleanup_connection(self.ctx.guild.id)

@@ -91,6 +91,17 @@ Ready for comprehensive testing and validation. All 6 phases of modernization co
   - `src/core/queue_manager.py`: Completely rewritten as simple lightweight queue
 - **Status**: ✅ Complete
 
+### Fixed Bot Auto-Reconnecting After Intentional Disconnect
+- **Issue**: Bot wouldn't leave voice channel after 30-minute timeout or !quit command - kept auto-reconnecting
+- **Root Cause**: `voice_manager.handle_disconnect()` was triggering auto-reconnection for ALL disconnects, including intentional ones
+- **Fix Applied**:
+  1. In `cleanup()`: Set `allow_auto_rejoin = False` and clear `channel_id` before disconnecting
+  2. In `play_next()`: Re-enable `allow_auto_rejoin = True` when starting playback (allows recovery from unexpected disconnects)
+  3. This way: intentional disconnects stay disconnected, but unexpected disconnects during playback still trigger recovery
+- **Files Modified**:
+  - `src/core/music_player.py`: Updated cleanup() and play_next()
+- **Status**: ✅ Complete
+
 ## Testing Phase Checklist
 - [ ] Test voice connection stability (24+ hour test)
 - [ ] Test automatic reconnection after disconnects
