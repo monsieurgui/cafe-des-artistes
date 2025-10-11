@@ -218,16 +218,20 @@ class MusicPlayer:
                     'no_warnings': True,
                     'noplaylist': False,  # Allow playlists
                     'default_search': 'ytsearch',
-                    'extract_flat': True,  # ALWAYS use flat extraction for speed
+                    'extract_flat': 'in_playlist',  # Use in_playlist for better metadata
                     'skip_download': True,
-                    'socket_timeout': 5,
-                    'retries': 2,
-                    'ignoreerrors': True
+                    'socket_timeout': 10,
+                    'retries': 3,
+                    'ignoreerrors': True,
+                    'nocheckcertificate': False,
+                    'age_limit': None
                 }
                 
-                # Use dedicated search pool with short timeout for fast response
+                # Use dedicated search pool with appropriate timeout
+                # Longer timeout for playlists (30s), shorter for regular searches (8s)
+                timeout_duration = 30 if is_playlist_url else 8
                 try:
-                    async with async_timeout.timeout(8):
+                    async with async_timeout.timeout(timeout_duration):
                         info = await asyncio.get_event_loop().run_in_executor(
                             self.search_pool, 
                             lambda: yt_dlp.YoutubeDL(ytdl_opts).extract_info(search_query, download=False)
@@ -248,12 +252,29 @@ class MusicPlayer:
                             # Check if this is a playlist or just search results
                             if info.get('_type') == 'playlist' or is_playlist_url:
                                 # It's a playlist - add all entries quickly
-                                for entry in entries:
-                                    song_url = entry.get('url') or f"https://www.youtube.com/watch?v={entry.get('id')}"
+                                print(f"[PLAYLIST] Processing playlist with {len(entries)} entries")
+                                for idx, entry in enumerate(entries):
+                                    # Build proper YouTube URL from entry
+                                    video_id = entry.get('id') or entry.get('video_id')
+                                    if not video_id:
+                                        # Try to extract from url if available
+                                        entry_url = entry.get('url', '')
+                                        if 'watch?v=' in entry_url:
+                                            video_id = entry_url.split('watch?v=')[1].split('&')[0]
+                                        else:
+                                            print(f"[PLAYLIST] Skipping entry {idx}: no valid video ID found. Entry keys: {list(entry.keys())}")
+                                            continue  # Skip entries without valid ID
+                                    
+                                    song_url = f"https://www.youtube.com/watch?v={video_id}"
+                                    title = entry.get('title', 'Unknown')
+                                    duration = entry.get('duration', 0)
+                                    
+                                    print(f"[PLAYLIST] Adding song {idx+1}: {title} ({duration}s) - {song_url}")
+                                    
                                     song = {
                                         'url': song_url,
-                                        'title': entry.get('title', 'Unknown'),
-                                        'duration': entry.get('duration', 0),
+                                        'title': title,
+                                        'duration': duration,
                                     }
                                     await self.queue_manager.add_song(song, preload=False)
                                     songs_added += 1
@@ -277,7 +298,12 @@ class MusicPlayer:
                                 songs_added = 1
                         else:
                             # Single video from flat extraction
-                            song_url = info.get('url') or f"https://www.youtube.com/watch?v={info.get('id')}"
+                            video_id = info.get('id') or info.get('video_id')
+                            if video_id:
+                                song_url = f"https://www.youtube.com/watch?v={video_id}"
+                            else:
+                                song_url = info.get('webpage_url') or info.get('url', query)
+                            
                             song = {
                                 'url': song_url,
                                 'title': info.get('title', 'Unknown'),
@@ -403,13 +429,17 @@ class MusicPlayer:
                         return
                     print(f"[PLAY_NEXT] Popped song: {next_song.get('title')}, Queue size now: {len(self.queue_manager.queue)}")
 
+                print(f"[PLAY_NEXT] Extracting full info for: {next_song.get('title')} - {next_song.get('url')}")
                 if next_song['url'] in self._song_cache:
                     info = self._song_cache[next_song['url']]
+                    print(f"[PLAY_NEXT] Using cached info")
                 else:
+                    print(f"[PLAY_NEXT] Extracting from yt-dlp...")
                     info = await asyncio.get_event_loop().run_in_executor(
                         self.thread_pool,
                         lambda: yt_dlp.YoutubeDL(YTDL_OPTIONS).extract_info(next_song['url'], download=False)
                     )
+                    print(f"[PLAY_NEXT] Extraction complete: {info.get('title') if info else 'None'}")
 
                 if not info:
                     await self.ctx.send(embed=discord.Embed(
