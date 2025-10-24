@@ -23,6 +23,12 @@ Created comprehensive modernization plan in plan.md addressing:
 - [x] Phase 6: Optimize queue management ✅ (AdvancedQueueManager + persistence + caching)
 - [ ] Phase 7: Testing & validation
 
+## Recent Fixes (2025-10-24)
+- ✅ Resolved widespread 403 Forbidden playback failures by aligning yt-dlp/FFmpeg requests with current YouTube requirements.
+  - Upgraded yt-dlp to 2025.10.22 and bumped requirement floor accordingly.
+  - Added browser user-agent + YouTube referer headers, forced IPv4 usage, and selected Android player client via `extractor_args` to bypass CDN throttling.
+  - Mirrored the same headers in `FFMPEG_OPTIONS` so relay streams reuse the authenticated session context, preventing segment fetch denials during playback and HLS relays.
+
 ## Critical Fixes Completed ✅
 1. ✅ Removed source_address workaround from yt-dlp configs
 2. ✅ Fixed NowPlayingDisplay infinite loop with state validation  

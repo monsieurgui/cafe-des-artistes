@@ -1,5 +1,24 @@
 import subprocess
 
+DEFAULT_USER_AGENT = (
+    "Mozilla/5.0 (Windows NT 10.0; Win64; x64) "
+    "AppleWebKit/537.36 (KHTML, like Gecko) "
+    "Chrome/124.0.0.0 Safari/537.36"
+)
+
+DEFAULT_HTTP_HEADERS = {
+    'User-Agent': DEFAULT_USER_AGENT,
+    'Accept-Language': 'en-US,en;q=0.9',
+    'Accept': '*/*',
+    'Referer': 'https://www.youtube.com/'
+}
+
+YOUTUBE_EXTRACTOR_ARGS = {
+    'youtube': {
+        'player_client': ['android'],
+    }
+}
+
 # Configuration YT-DLP - Modernized and reduced to valid, stable options
 YTDL_OPTIONS = {
     'format': 'bestaudio[acodec=opus]/bestaudio/best',
@@ -19,7 +38,11 @@ YTDL_OPTIONS = {
     'writeautomaticsub': False,
     'default_search': 'ytsearch',
     'ignoreerrors': True,
-    'no_color': True
+    'no_color': True,
+    'user_agent': DEFAULT_USER_AGENT,
+    'http_headers': DEFAULT_HTTP_HEADERS,
+    'force_ipv4': True,
+    'extractor_args': YOUTUBE_EXTRACTOR_ARGS,
 }
 
 # Configuration YT-DLP pour le téléchargement
@@ -35,7 +58,11 @@ YTDL_DOWNLOAD_OPTIONS = {
     }],
     'nocheckcertificate': True,
     'ignoreerrors': True,
-    'no_color': True
+    'no_color': True,
+    'user_agent': DEFAULT_USER_AGENT,
+    'http_headers': DEFAULT_HTTP_HEADERS,
+    'force_ipv4': True,
+    'extractor_args': YOUTUBE_EXTRACTOR_ARGS,
 }
 
 YTDL_OPTIONS_LIVE = {
@@ -51,18 +78,32 @@ YTDL_OPTIONS_LIVE = {
     'postprocessor_hooks': [],
     'socket_timeout': 30,
     'retries': 5,
+    'user_agent': DEFAULT_USER_AGENT,
+    'http_headers': DEFAULT_HTTP_HEADERS,
+    'force_ipv4': True,
+    'extractor_args': YOUTUBE_EXTRACTOR_ARGS,
 }
 
 # Configuration FFMPEG - Modernized for improved stability
+FFMPEG_HEADERS = ''.join([
+    f"User-Agent: {DEFAULT_USER_AGENT}\r\n",
+    'Accept: */*\r\n',
+    'Accept-Language: en-US,en;q=0.9\r\n',
+    'Referer: https://www.youtube.com/\r\n',
+])
+
 FFMPEG_OPTIONS = {
     'before_options': (
         '-reconnect 1 '
         '-reconnect_streamed 1 '
         '-reconnect_delay_max 5 '
-        '-analyzeduration 0 '
+        '-user_agent "{user_agent}" '
+        '-headers "{headers}" '
+        '-protocol_whitelist "file,http,https,tcp,tls" '
+        '-nostdin '
         '-loglevel error '
         '-nostats '
-    ),
+    ).format(user_agent=DEFAULT_USER_AGENT, headers=FFMPEG_HEADERS),
     'options': '-vn'
 }
 
